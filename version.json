@@ -1,0 +1,8 @@
+{
+    "version": "2.1.0",
+    "release_notes": "新增联网更新功能；修复若干已知问题。",
+    "download_url": "https://gitee.com/amosli_1_0/py-adb/releases/download/v2.1.0/BugCatcher.exe",
+    "md5": "504a83d1872d502f0bc800c3c84a8942",
+    "force_update": false,
+    "min_supported_version": "2.0.0"
+}

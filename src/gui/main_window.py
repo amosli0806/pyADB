@@ -9,9 +9,9 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QToolBar, QPushButton, QLineEdit,
     QSplitter, QTextEdit, QMenu, QMessageBox, QFileDialog,
-    QDialog, QScrollArea, QGridLayout, QLabel
+    QDialog, QScrollArea, QGridLayout, QLabel, QProgressDialog
 )
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, QTimer
 from PySide6.QtGui import QAction, QIcon, QShortcut, QKeySequence, QTextCursor
 from src.models.command import Command
 from src.gui.device_selector import DeviceSelector
@@ -27,6 +27,10 @@ from PySide6.QtWidgets import QApplication
 from src.gui.dialogs.select_commands_dialog import SelectCommandsDialog
 from PySide6.QtWidgets import QSystemTrayIcon
 import qtawesome as qta
+
+# 新增导入更新模块
+from src.core.updater import Updater
+
 
 class FlowLayout(QHBoxLayout):
     """流式布局，子控件超出宽度时自动换行"""
@@ -98,6 +102,10 @@ class MainWindow(QMainWindow):
         self.apply_shortcuts()
         self.device_selector.start_refresh()
         self._mirror_dialog = None
+
+        # 当前版本号（硬编码，发布时修改）
+        self.current_version = "2.0.0"
+        self.updater = None
 
     def _apply_display_filter(self):
         """根据配置重新应用显示过滤模式"""
@@ -247,7 +255,7 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
 
         # ---- 菜单下拉面板样式（圆角 12px + 阴影） ----
-        menu.setStyleSheet (
+        menu.setStyleSheet(
             """
             QMenu {
                 background-color: #ffffff;
@@ -274,7 +282,7 @@ class MainWindow(QMainWindow):
                 margin: 4px 10px;
             }
         """
-            )
+        )
 
         # ---------- ① 展示过滤组 ----------
         show_menu = QMenu ( "展示指令" , self )
@@ -301,7 +309,7 @@ class MainWindow(QMainWindow):
                 color: #1a73e8;
             }
         """
-            )
+        )
 
         show_all_action = QAction ( "   显示全部   " , self )
         show_all_action.setIcon ( qta.icon ( 'fa6s.list' , color = '#2c3e50' ) )
@@ -369,6 +377,14 @@ class MainWindow(QMainWindow):
         self.help_action.setIcon ( qta.icon ( 'fa6s.circle-question' , color = '#2c3e50' ) )
         self.help_action.triggered.connect ( self.on_help )
         menu.addAction ( self.help_action )
+
+        # ---- 新增：检查更新 ----
+        self.update_action = QAction("检查更新", self)
+        self.update_action.setIcon(qta.icon('fa6s.cloud-arrow-up', color='#2c3e50'))
+        self.update_action.triggered.connect(self.on_check_update)
+        menu.addAction(self.update_action)
+
+        menu.addSeparator()
 
         self.about_action = QAction ( "  关  于 " , self )
         self.about_action.setIcon ( qta.icon ( 'fa6s.circle-info' , color = '#2c3e50' ) )
@@ -462,7 +478,7 @@ class MainWindow(QMainWindow):
             ("MD5" , self.on_md5_query , 'fa6s.key') ,
             ("弱网" , self.on_weak_network , 'fa6s.signal') ,
             ("抓包" , self.on_packet_capture , 'fa6s.network-wired') ,
-            ]
+        ]
 
         # 创建容器和网格布局
         quick_widget = QWidget()
@@ -578,6 +594,75 @@ class MainWindow(QMainWindow):
                     self._shortcuts.append(sc)
                 except:
                     pass
+
+    # -------------------- 更新相关 --------------------
+
+    @Slot()
+    def on_check_update(self, manual=True):
+        if self.updater:
+            return  # 已有更新操作进行中，忽略
+        self.updater = Updater(self.current_version, self)
+        self.updater.check_finished.connect(self._on_update_check_result)
+        self.updater.check_for_updates()
+        if manual:
+            self.statusBar().showMessage("正在检查更新...")
+
+    def _on_update_check_result(self, has_update, msg, update_info):
+        if has_update:
+            # 显示更新对话框
+            notes = update_info.release_notes if update_info.release_notes else "无更新日志"
+            reply = QMessageBox.question(
+                self,
+                "发现新版本",
+                f"最新版本: {update_info.version}\n\n更新日志:\n{notes}\n\n是否立即下载并更新？",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self._start_download(update_info)
+            else:
+                self.updater = None
+        else:
+            if msg:
+                QMessageBox.information(self, "检查更新", msg)
+            self.updater = None
+
+    def _start_download(self, update_info):
+        if self.updater is None:
+            return
+
+        progress = QProgressDialog("正在下载更新...", "取消", 0, 100, self)
+        progress.setWindowTitle("更新下载")
+        progress.setModal(True)
+        progress.setAutoClose(False)
+
+        def on_progress(received, total):
+            if total > 0:
+                progress.setValue(int(received / total * 100))
+            else:
+                progress.setValue(0)
+
+        def on_download_finished(success, result):
+            progress.close()
+            if success:
+                if self.updater is not None:
+                    self.updater.apply_update(result)
+                else:
+                    QMessageBox.critical(self, "更新失败", "更新器已失效，请重新启动程序检查更新。")
+            else:
+                if result != "用户取消":  # 用户取消不弹出错误
+                    QMessageBox.critical(self, "下载失败", result)
+                self.updater = None
+
+        self.updater.download_progress.connect(on_progress)
+        self.updater.download_finished.connect(on_download_finished)
+        self.updater.download_update(update_info.download_url)
+
+        # 取消时调用 cancel_download
+        progress.canceled.connect(
+            lambda: self.updater.cancel_download() if self.updater else None
+        )
+
+    # -------------------- 原有方法（未改动） --------------------
 
     def on_command_stopped(self, cmd_id, cmd_name):
         """命令被手动停止时立即更新 UI 状态"""
@@ -939,7 +1024,7 @@ class MainWindow(QMainWindow):
 
         <div class="info-grid">
             <span class="label">版本</span>
-            <span class="value">V2.0 <span class="tag">Release</span></span>
+            <span class="value">V2.0.0 <span class="tag">Release</span></span>
             <span class="label">开发者</span>
             <span class="value">李金钊</span>
             <span class="label">反馈</span>
@@ -962,10 +1047,12 @@ class MainWindow(QMainWindow):
             <div class="item">文件推送</div>
             <div class="item">设备投屏（scrcpy）</div>
             <div class="item">MD5 查询</div>
+            <div class="item">联网自动更新</div>
         </div>
 
         <h3>📋 更新日志</h3>
         <ul class="changelog">
+            <li class="new">✨ 新增联网自动更新功能（支持 Gitee 源）</li>
             <li class="ui">🎨 全面替换按钮图标为 Font Awesome 图标，统一视觉风格</li>
             <li class="ui">🎨 优化按钮禁用状态：禁用时清除图标仅显示纯文本，避免视觉干扰</li>
             <li class="ui">🎨 优化多个对话框的焦点行为，打开时输入框不再自动获取焦点</li>
@@ -973,7 +1060,7 @@ class MainWindow(QMainWindow):
             <li class="opt">⚡ 弱网模拟按钮点击不再导致另一个按钮闪烁</li>
             <li class="fix">🔧 修复若干界面细节问题，提升交互流畅度</li>
             <li class="new">✨ 新增快捷键设置页面图标</li>
-            <li class="ui">🎨 更新帮助中心与关于页面内容，版本升级至 V2.0</li>
+            <li class="ui">🎨 更新帮助中心与关于页面内容</li>
         </ul>
 
         <h3>⌨️ 常用快捷键</h3>
@@ -1036,10 +1123,10 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def append_log(self, text):
-        # 1. 添加新日志
+        # 添加新日志
         self.log_output.append(text)
 
-        # 2. 限制日志显示行数为 25 行
+        # 限制日志显示行数为 25 行
         max_lines = 25
         doc = self.log_output.document()
 
@@ -1536,7 +1623,7 @@ class MainWindow(QMainWindow):
         </div>
 
         <div class="footer">
-            捕虫师 —— 让 Android 调试更简单 · 版本 V2.0
+            捕虫师 —— 让 Android 调试更简单
         </div>
         """
 
