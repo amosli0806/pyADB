@@ -1,0 +1,25 @@
+# .gitignore
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+resources/icons/  # 图标为二进制文件，通常不纳入版本控制
+config.json       # 用户配置
