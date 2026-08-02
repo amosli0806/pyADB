@@ -195,3 +195,14 @@ class Settings:
         """加载上次勾选的命令 ID 列表，若不存在则返回空列表"""
         settings = cls.load()
         return settings.get('checked_commands', [])
+
+    @classmethod
+    def get_auto_check_update(cls):
+        settings = cls.load()
+        return settings.get('auto_check_update', True)
+
+    @classmethod
+    def set_auto_check_update(cls, enabled):
+        settings = cls.load()
+        settings['auto_check_update'] = enabled
+        cls.save(settings)
