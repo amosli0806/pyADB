@@ -6,6 +6,9 @@ import sys
 # sys 模块提供了对 Python 解释器相关功能的访问，比如通过 sys.argv 获取命令行参数，
 # 以及使用 sys.exit() 退出程序。
 
+import time
+
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 # QApplication 是 Qt 应用程序的核心类，管理应用程序的控制流和主要设置。
 # 每个 Qt 应用程序有且仅有一个 QApplication 实例。
@@ -49,10 +52,29 @@ def main():
         # 如果加载失败，打印错误信息。在实际项目中可能会改用日志记录。
         print(f"加载样式表失败: {e}")  # 可改为日志或忽略
 
+    # ---- 启动封面：先亮起来再干活，避免点击后几百毫秒毫无反馈 ----
+    from src.gui.splash import SplashWindow
+    splash = SplashWindow()
+    splash.show()
+    splash.fade_in()
+    app.processEvents()
+    started = time.monotonic()
+
+    splash.set_stage("正在加载界面…", 0.35)
+    app.processEvents()
+
     # 创建主窗口实例。
     window = MainWindow()
+
+    splash.set_stage("正在准备主界面…", 0.85)
+    app.processEvents()
     # 显示主窗口。默认情况下，窗口创建后是隐藏的，需要调用 show() 使其可见。
     window.show()
+
+    splash.set_stage("就绪", 1.0)
+    # 至少停留 650ms：太快一闪而过反而像闪屏 bug
+    remain = max(0, 650 - int((time.monotonic() - started) * 1000))
+    QTimer.singleShot(remain + 140, splash.finish)
 
     # 启动 Qt 事件循环，并等待应用程序退出。
     # app.exec() 会进入事件循环（处理用户输入、重绘等），直到调用 quit() 或关闭窗口。

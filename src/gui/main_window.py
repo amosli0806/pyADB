@@ -526,32 +526,33 @@ class MainWindow(QMainWindow):
         if self.updater is None:
             return
 
-        progress = QProgressDialog("正在下载更新...", "取消", 0, 100, self)
-        progress.setWindowTitle("更新下载")
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.setAutoClose(False)
-        progress.setAutoReset(False)
-        progress.setValue(0)
+        from src.gui.dialogs.download_progress_dialog import DownloadProgressDialog
+
+        is_patch = bool(getattr(update_info, "patch_url", ""))
+        total_hint = update_info.patch_size if is_patch else update_info.asset_size
+        progress = DownloadProgressDialog(update_info.version, total_hint, is_patch, self)
 
         def on_progress(received, total):
-            if total > 0:
-                progress.setValue(int(received * 100 / total))
-                progress.setLabelText(
-                    f"正在下载更新... {received / 1024 / 1024:.1f} / {total / 1024 / 1024:.1f} MB"
-                )
-            else:
-                progress.setLabelText(f"正在下载更新... {received / 1024 / 1024:.1f} MB")
+            progress.set_progress(received, total)
 
         def on_download_finished(success, result):
-            # 先断开 canceled：QProgressDialog 关闭时也会发这个信号，
-            # 不断开就会在"下载完成"后触发 cancel，把刚下好的包删掉
+            for sig, slot in ((self.updater.download_progress, on_progress),):
+                try:
+                    sig.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass
+            # 先断开 canceled：关闭窗口本身也会触发取消逻辑
             try:
                 progress.canceled.disconnect()
             except (RuntimeError, TypeError):
                 pass
+
+            if success:
+                progress.set_stage("正在校验并准备安装…")
+                QApplication.processEvents()
             progress.close()
             progress.deleteLater()     # 以 self 为父对象，不销毁会累积
+
             if success:
                 from src.gui.dialogs.update_dialog import UpdateReadyDialog
                 ready = UpdateReadyDialog(update_info, result, self)
@@ -565,15 +566,14 @@ class MainWindow(QMainWindow):
                     QMessageBox.critical(self, "下载失败", result)
                 self._release_updater()
 
+        progress.canceled.connect(
+            lambda: self.updater.cancel_download() if self.updater else None
+        )
         self.updater.download_progress.connect(on_progress)
         self.updater.download_finished.connect(on_download_finished)
         # 不传 url：让 updater 自己决定「有增量补丁就先下补丁」，失败会退回全量
         self.updater.download_update()
-
-        # 取消时调用 cancel_download
-        progress.canceled.connect(
-            lambda: self.updater.cancel_download() if self.updater else None
-        )
+        progress.show()
 
     # -------------------- 原有方法（未改动） --------------------
 

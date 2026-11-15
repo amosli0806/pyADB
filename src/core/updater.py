@@ -47,7 +47,14 @@ FALLBACK_VERSION_URL = "https://gitee.com/amosli_1_0/py-adb/raw/master/version.j
 # ---------- 下载加速 ----------
 # 只对 github.com 官方域的资产 URL 拼镜像前缀；检查更新（API）始终直连，
 # 版本与摘要必须来自官方，镜像只负责搬字节，下完仍按 sha256 校验。
-DOWNLOAD_MIRROR = "https://gh-proxy.com/"
+# 按顺序尝试，前一个不通就换下一个，最后直连兜底。
+# 单个镜像经常限速或抽风（实测 gh-proxy 只有 200KB/s 左右），多备几个能明显提升成功率。
+DOWNLOAD_MIRRORS = (
+    "https://gh-proxy.com/",
+    "https://ghfast.top/",
+    "https://ghproxy.net/",
+)
+DOWNLOAD_MIRROR = DOWNLOAD_MIRRORS[0]      # 兼容旧引用
 DOWNLOAD_MIRROR_ENV = "BUGCATCHER_DOWNLOAD_MIRROR"
 
 # urllib 只接受单个秒数；(连接, 读取) 是 requests 的写法，传进来会直接 TypeError
@@ -137,26 +144,41 @@ class UpdateInfo:
         return self.published_at[:10] if self.published_at else ""
 
 
-def _mirror_prefix() -> str:
-    """当前生效的镜像前缀（末尾带 /），空串 = 直连。环境变量可整体覆盖。"""
-    prefix = os.environ.get(DOWNLOAD_MIRROR_ENV, "").strip() or DOWNLOAD_MIRROR
-    if not prefix:
-        return ""
-    return prefix if prefix.endswith("/") else prefix + "/"
+def _mirror_prefixes() -> list:
+    """当前可用的镜像前缀列表（末尾都带 /）。环境变量存在时只认它。"""
+    env = os.environ.get(DOWNLOAD_MIRROR_ENV, "").strip()
+    raw = [env] if env else list(DOWNLOAD_MIRRORS)
+    out = []
+    for prefix in raw:
+        if not prefix:
+            continue
+        out.append(prefix if prefix.endswith("/") else prefix + "/")
+    return out
 
 
-def _mirrored_url(asset_url: str) -> str:
-    """只对 github.com 官方域拼镜像；本地桩服务/内网镜像保持直连。"""
-    prefix = _mirror_prefix()
-    if not prefix or not asset_url:
-        return asset_url
+def _is_github_url(url: str) -> bool:
     try:
-        host = (urlparse(asset_url).hostname or "").lower()
+        host = (urlparse(url).hostname or "").lower()
     except Exception:
-        host = ""
-    if not (host == "github.com" or host.endswith(".github.com")):
+        return False
+    return host == "github.com" or host.endswith(".github.com")
+
+
+def _mirrored_url(asset_url: str, prefix: str = None) -> str:
+    """只对 github.com 官方域拼镜像；本地桩服务/内网镜像保持直连。"""
+    prefix = _mirror_prefixes()[0] if prefix is None and _mirror_prefixes() else prefix
+    if not prefix or not asset_url or not _is_github_url(asset_url):
         return asset_url
     return prefix + asset_url
+
+
+def _candidate_urls(asset_url: str) -> list:
+    """下载候选：各镜像依次尝试，最后直连官方地址。"""
+    if not asset_url or not _is_github_url(asset_url):
+        return [asset_url]
+    urls = [prefix + asset_url for prefix in _mirror_prefixes()]
+    urls.append(asset_url)
+    return urls
 
 
 def _parse_version(v) -> list:
@@ -453,25 +475,29 @@ class Updater(QObject):
         self._temp_file = target
         self._part_file = target + ".part"
 
-        dl_url = _mirrored_url(url)
-
+        # 多个镜像轮流试，最后直连；同一个源连续失败两次就换下一个
         last_err = None
-        for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
-            if self._is_cancelled:
-                raise UpdateCancelled()
-            try:
-                self._download_once(dl_url, self._part_file, size_hint)
-                os.replace(self._part_file, target)
-                self._part_file = None
+        done = False
+        for dl_url in _candidate_urls(url):
+            for attempt in range(1, 3):
+                if self._is_cancelled:
+                    raise UpdateCancelled()
+                try:
+                    self._download_once(dl_url, self._part_file, size_hint)
+                    os.replace(self._part_file, target)
+                    self._part_file = None
+                    done = True
+                    break
+                except UpdateCancelled:
+                    raise
+                except Exception as e:
+                    last_err = e
+                    if attempt < 2 and not self._is_cancelled:
+                        time.sleep(1)
+            if done:
                 break
-            except UpdateCancelled:
-                raise
-            except Exception as e:
-                last_err = e
-                if attempt < _DOWNLOAD_ATTEMPTS and not self._is_cancelled:
-                    time.sleep(2)       # 稍等再续传
-        else:
-            raise RuntimeError(f"{last_err}（已重试 {_DOWNLOAD_ATTEMPTS - 1} 次）")
+        if not done:
+            raise RuntimeError(f"{last_err}（镜像与直连均失败）")
 
         self._verify(target, patch=patch)
         return target
