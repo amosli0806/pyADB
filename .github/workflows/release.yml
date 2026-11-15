@@ -111,6 +111,28 @@ jobs:
           echo "patch=$PATCH_OUT" >> "$GITHUB_OUTPUT"
           echo "补丁产出：$PATCH_OUT（$(du -h "$PATCH_OUT" | cut -f1)）" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: 生成发版说明
+        id: notes
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          # 人工摘要优先：version.json 里的 release_notes 是发版时手写的，
+          # 比 --generate-notes 那行 "Full Changelog" 有用得多（应用内更新提示直接显示这段）
+          SUMMARY="$(python -c "import json,io;print(json.load(io.open('version.json',encoding='utf-8')).get('release_notes','') or '')")"
+          if [ -n "$PREV_TAG" ]; then RANGE="$PREV_TAG..$TAG"; else RANGE="$TAG"; fi
+          COMMITS="$(git log --no-merges --pretty=format:'- %s' "$RANGE" | head -40)"
+          {
+            [ -n "$SUMMARY" ] && printf '%s\n\n' "$SUMMARY"
+            echo "### 本次提交"
+            printf '%s\n\n' "$COMMITS"
+            if [ -n "$PREV_TAG" ]; then
+              echo "**完整变更**：https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
+            fi
+          } > NOTES.md
+          echo "--- 发版说明预览 ---"
+          cat NOTES.md
+
       - name: 创建或更新 Release
         shell: bash
         env:
@@ -127,8 +149,9 @@ jobs:
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" $FILES --clobber
+            gh release edit "$TAG" --notes-file NOTES.md
           else
             gh release create "$TAG" $FILES \
               --title "捕虫师 $TAG" \
-              --generate-notes
+              --notes-file NOTES.md
           fi
