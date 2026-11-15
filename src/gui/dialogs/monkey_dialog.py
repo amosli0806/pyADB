@@ -1,8 +1,10 @@
 # src/gui/dialogs/monkey_dialog.py
+import os
+import re
 import subprocess
 import sys
+import tempfile
 import threading
-import re
 import time
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
                                QLineEdit, QSpinBox, QPushButton, QLabel,
@@ -12,6 +14,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 import qtawesome as qta
+from src.gui.toast import Toast
 
 
 class MonkeyDialog(QDialog):
@@ -26,6 +29,9 @@ class MonkeyDialog(QDialog):
         self.monitor_thread = None   # 用于监控 Monkey 进程的线程
         self.setup_ui()
         self.check_running_monkey()   # 启动时检查是否有 Monkey 在运行
+
+        # 白名单文件模式下、设备侧白名单文件的路径（结束后要清理）
+        self._whitelist_remote = None
 
     def setup_ui(self):
         # 主布局
@@ -58,11 +64,19 @@ class MonkeyDialog(QDialog):
         pkg_layout.addWidget(self.select_pkg_btn)
         form.addRow("  包  名   :", pkg_layout)
 
+        # ---- 启动方式：部分受限车机 ROM 对 -p 参数不生效（点开始后设备没动作），
+        #      白名单文件方式（--pkg-whitelist-file）在这类系统上通常可用
+        self.start_mode = QComboBox()
+        self.start_mode.addItem("-p 参数（默认）", "param")
+        self.start_mode.addItem("白名单文件（兼容受限系统）", "whitelist")
+        form.addRow("  启动方式 :", self.start_mode)
+
         main_layout.addLayout(form)
 
         # 高级选项分组框（默认折叠）
         self.advanced_group = QGroupBox("高级选项")
         self.advanced_group.setCheckable(True)
+        self.advanced_group.setProperty("checkable", True)   # QSS 用它给标题让出勾选框位置
         self.advanced_group.setChecked(True)
         self.advanced_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         main_layout.addWidget(self.advanced_group)
@@ -70,9 +84,11 @@ class MonkeyDialog(QDialog):
         # 高级选项布局（使用滚动区域）
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)   # 只保留纵向滚动
         scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         scroll_widget = QWidget()
-        scroll_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # 横向用 Ignored：让内部表单缩到视口宽度，而不是按 sizeHint 撑出视口再被裁掉
+        scroll_widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         scroll_widget.setMinimumHeight(400)
         scroll_layout = QVBoxLayout(scroll_widget)
         scroll_layout.setContentsMargins(5, 5, 5, 5)
@@ -81,7 +97,7 @@ class MonkeyDialog(QDialog):
         throttle_layout = QFormLayout()
         self.throttle = QSpinBox()
         self.throttle.setRange(0, 10000)
-        self.throttle.setValue(500)
+        self.throttle.setValue(800)
         self.throttle.setSuffix(" 毫秒")
         throttle_layout.addRow(" 事 件 间 隔  :", self.throttle)
         scroll_layout.addLayout(throttle_layout)
@@ -252,6 +268,50 @@ class MonkeyDialog(QDialog):
         except Exception:
             return ""
 
+    # ---------------- 白名单文件（兼容受限 ROM） ----------------
+    def _push_whitelist_file(self, pkgs) -> bool:
+        """
+        把包名写成本地文件推到设备，返回是否成功。
+
+        为什么需要这条路径：部分车机 ROM 上 monkey 的 -p 参数会被忽略 ——
+        点「开始」后设备毫无反应也不报错，换 --pkg-whitelist-file 通常就正常了。
+        """
+        local = os.path.join(tempfile.gettempdir(), "bugcatcher_monkey_whitelist.txt")
+        remote = "/data/local/tmp/bugcatcher_monkey_whitelist.txt"
+        try:
+            with open(local, "w", encoding="utf-8", newline="\n") as f:
+                f.write("\n".join(pkgs) + "\n")
+
+            cmd = ["adb", "-s", self.device_serial, "push", local, remote]
+            if sys.platform == 'win32':
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=20,
+                                     creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8')
+            else:
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=20, encoding='utf-8')
+
+            out = (res.stdout or "") + (res.stderr or "")
+            if res.returncode != 0 or "error" in out.lower():
+                QMessageBox.warning(self, "白名单文件推送失败",
+                                    f"无法把白名单文件推到设备：\n{out.strip()[:200]}\n\n可改用「-p 参数」方式启动。")
+                return False
+
+            self._whitelist_remote = remote
+            return True
+        except Exception as e:
+            QMessageBox.warning(self, "白名单文件推送失败", f"{e}\n\n可改用「-p 参数」方式启动。")
+            return False
+
+    def _remove_whitelist_file(self):
+        """删除设备侧白名单文件（尽力而为，失败忽略）"""
+        remote = getattr(self, "_whitelist_remote", None)
+        self._whitelist_remote = None
+        if not remote:
+            return
+        try:
+            self._run_adb_cmd(["adb", "-s", self.device_serial, "shell", "rm", "-f", remote], timeout=5)
+        except Exception:
+            pass
+
     def choose_packages(self):
         """弹出应用选择对话框，让用户选择多个应用，支持搜索"""
         cmd3 = ["adb", "-s", self.device_serial, "shell", "pm", "list", "packages", "-3"]
@@ -264,7 +324,7 @@ class MonkeyDialog(QDialog):
 
         apps = system + third_party
         if not apps:
-            QMessageBox.warning(self, "错误", "无法获取应用列表，请检查设备连接")
+            Toast.notify(self, "无法获取应用列表，请检查设备连接")
             return
 
         dialog = QDialog(self)
@@ -399,7 +459,7 @@ class MonkeyDialog(QDialog):
 
     def start_monkey(self):
         if self.monkey_running:
-            QMessageBox.warning(self, "提示", "Monkey 已在运行，请先停止后再启动。")
+            Toast.notify(self, "Monkey 已在运行，请先停止后再启动。")
             return
 
         # 验证输入
@@ -413,7 +473,7 @@ class MonkeyDialog(QDialog):
 
         for p in pkgs:
             if not re.match(r'^[a-zA-Z0-9_.]+$', p):
-                QMessageBox.warning(self, "错误", f"包名 {p} 格式不正确")
+                Toast.notify(self, f"包名 {p} 格式不正确")
                 return
 
         if pkgs:
@@ -421,13 +481,23 @@ class MonkeyDialog(QDialog):
                 check_cmd = ["adb", "-s", self.device_serial, "shell", "pm", "list", "packages", p]
                 result = self._run_adb_cmd(check_cmd, timeout=5)
                 if not result.strip():
-                    QMessageBox.warning(self, "错误", f"包名 {p} 不存在于设备上，请检查包名是否正确。")
+                    Toast.notify(self, f"包名 {p} 不存在于设备上，请检查包名是否正确。")
                     return
+
+        # ---- 白名单文件模式：先把包名推到设备（受限 ROM 上 -p 常常静默失效） ----
+        mode = self.start_mode.currentData() if hasattr(self, "start_mode") else "param"
+        self._whitelist_remote = None
+        if mode == "whitelist" and pkgs:
+            if not self._push_whitelist_file(pkgs):
+                return
 
         # 构建命令
         cmd = ["adb", "-s", self.device_serial, "shell", "monkey"]
-        for p in pkgs:
-            cmd.extend(["-p", p])
+        if mode == "whitelist" and self._whitelist_remote:
+            cmd.extend(["--pkg-whitelist-file", self._whitelist_remote])
+        else:
+            for p in pkgs:
+                cmd.extend(["-p", p])
         cmd.extend(["-s", str(seed)])
 
         if self.advanced_group.isChecked():
@@ -506,13 +576,14 @@ class MonkeyDialog(QDialog):
                 self._set_stop_button_state(False)
             finally:
                 self.process = None
+                self._remove_whitelist_file()
 
         threading.Thread(target=run, daemon=True).start()
 
     def stop_monkey(self):
         """停止当前运行的 Monkey 进程"""
         if not self.monkey_running:
-            QMessageBox.information(self, "提示", "当前没有正在运行的 Monkey")
+            Toast.notify(self, "当前没有正在运行的 Monkey")
             return
 
         # 优先使用已知的 PID
@@ -538,6 +609,9 @@ class MonkeyDialog(QDialog):
                 self._set_stop_button_state(False)
             except Exception as e:
                 self.status.setText(f"停止失败: {e}")
+
+        # 停止后顺手清掉设备侧白名单文件
+        self._remove_whitelist_file()
 
     def closeEvent(self, event):
         """关闭窗口时停掉 Monkey，避免设备侧进程与本地 adb 子进程残留"""

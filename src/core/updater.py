@@ -47,7 +47,8 @@ FALLBACK_VERSION_URL = "https://gitee.com/amosli_1_0/py-adb/raw/master/version.j
 DOWNLOAD_MIRROR = "https://gh-proxy.com/"
 DOWNLOAD_MIRROR_ENV = "BUGCATCHER_DOWNLOAD_MIRROR"
 
-_TIMEOUT = (5, 20)              # (连接, 读取)
+# urllib 只接受单个秒数；(连接, 读取) 是 requests 的写法，传进来会直接 TypeError
+_TIMEOUT = 20
 _DOWNLOAD_TIMEOUT = 60          # 流式下载的读超时，比对 API 宽松
 _DOWNLOAD_ATTEMPTS = 3
 _CHUNK = 256 * 1024
@@ -178,6 +179,9 @@ class Updater(QObject):
     # ---------------- 检查更新 ----------------
     @staticmethod
     def _fetch_json(url: str, timeout=_TIMEOUT) -> dict:
+        # 兜一层：万一有人按 requests 习惯传 (连接, 读取) 元组，取读超时而不是让 urlopen 崩
+        if isinstance(timeout, (tuple, list)):
+            timeout = timeout[-1]
         req = request.Request(url, headers={
             "User-Agent": "BugCatcher-Client",
             "Accept": "application/vnd.github+json",
@@ -293,7 +297,9 @@ class Updater(QObject):
             else:
                 reason = f"GitHub HTTP {e.code}"
         except Exception as e:
-            reason = f"GitHub 不可达（{type(e).__name__}）"
+            # 带上具体原因（DNS / 证书 / 超时…），否则用户只知道"不可达"却无从判断
+            detail = getattr(e, "reason", None) or e
+            reason = f"GitHub 不可达（{str(detail)[:60]}）"
 
         # 2) 兜底：Gitee version.json
         try:
@@ -304,7 +310,8 @@ class Updater(QObject):
                 return False, f"当前已是最新版本（{self.current_version}）", None
             reason += "；Gitee 未返回版本号"
         except Exception as e:
-            reason += f"；Gitee 不可达（{type(e).__name__}）"
+            detail = getattr(e, "reason", None) or e
+            reason += f"；Gitee 不可达（{str(detail)[:60]}）"
 
         return False, f"检查更新失败：{reason}", None
 

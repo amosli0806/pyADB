@@ -6,11 +6,12 @@ import re
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QSpinBox, QDoubleSpinBox, QPushButton, QLabel,
-    QMessageBox, QComboBox, QDialogButtonBox, QTextEdit
+    QMessageBox, QComboBox, QDialogButtonBox, QTextEdit, QSizePolicy
 )
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QIcon
 import qtawesome as qta
+from src.gui.toast import Toast
 
 
 class WeakNetworkDialog(QDialog):
@@ -18,6 +19,8 @@ class WeakNetworkDialog(QDialog):
     show_warning_signal = Signal(str, str)
     show_critical_signal = Signal(str, str)
     residual_found = Signal(list)      # 启动检测到残留规则时发射（网卡名列表）
+    # 能力探测结果：(是否可提权, su 路径, tc 路径, 内核是否支持 netem)
+    capability_ready = Signal(bool, str, str, bool)
 
     # 启动时检查残留规则涉及的网卡（与下拉框默认项保持一致）
     RESIDUAL_CHECK_IFACES = ("wlan0", "eth0", "rmnet0")
@@ -28,31 +31,41 @@ class WeakNetworkDialog(QDialog):
         self.device_serial = device_serial
         self.tc_path = None
         self._processing = False
+        # ---- 设备能力（打开时后台探测，参考虫师的做法） ----
+        # 为什么分这么细：只判「能不能加 netem」会在没 root 的设备上也报「内核没有 netem」，
+        # 原因说错，用户会跑去折腾内核。这里把 root / tc / netem 三者分开，各给一句人话。
+        self.has_privilege = False      # 已经能执行特权命令（root，或 su -c 可用）
+        self.su_path = None             # 找到的 su 路径（没授权时也有值）
+        self.netem_ok = None            # None=还没探测过
+        self._probing = False
         # 是否已有弱网规则生效，以及生效在哪块网卡上
         # 关闭对话框/退出程序时需要据此自动恢复网络，避免设备残留规则导致断网
         self._applied = False
         self._applied_iface = None
         self._closing = False       # 是否正在关闭（用于丢弃后台检测的迟到回调）
         self.setWindowTitle("弱网模拟")
-        self.resize(450, 320)
+        self.resize(470, 440)   # 增加能力横幅后需要更高的空间
         self.setup_ui()
         self.connect_signals()
         # 打开即后台检查上次是否留下未清理的规则（不阻塞界面）
         self._start_residual_check()
+        # 同时探测设备能力：root / tc / netem（不阻塞界面）
+        self._probe_capability()
 
     def connect_signals(self):
         self.show_info_signal.connect(self._show_info)
         self.show_warning_signal.connect(self._show_warning)
         self.show_critical_signal.connect(self._show_critical)
         self.residual_found.connect(self._on_residual_found)
+        self.capability_ready.connect(self._on_capability_ready)
 
     @Slot(str, str)
     def _show_info(self, title, text):
-        QMessageBox.information(self, title, text)
+        Toast.notify(self, text)
 
     @Slot(str, str)
     def _show_warning(self, title, text):
-        QMessageBox.warning(self, title, text)
+        Toast.notify(self, text)
 
     @Slot(str, str)
     def _show_critical(self, title, text):
@@ -61,17 +74,29 @@ class WeakNetworkDialog(QDialog):
     def setup_ui(self):
         layout = QVBoxLayout(self)
 
-        # ---- 提示标签（无线联调警告样式） ----
-        info = QLabel(
-            "注意事项：\n1.弱网模拟需要设备已 root，且内核支持 netem。\n"
-            "2.仅对指定网卡生效，断开 WiFi 后规则可能自动清除。\n"
-            "3.wlan0是WiFi，eth0是移动数据（TSU）"
-        )
-        info.setWordWrap(True)
-        info.setStyleSheet(
-            "background-color: #FBEFEC; color: #8C3A2B; padding: 8px; border-radius: 4px; font-weight: bold;"
-        )
-        layout.addWidget(info)
+        # ---- 设备能力横幅：探测完自动更新，说不清的地方直接给下一步该做什么 ----
+        banner_row = QHBoxLayout()
+        banner_row.setSpacing(8)
+
+        self.capability_label = QLabel("正在检测设备能力…")
+        self.capability_label.setObjectName("capabilityBanner")
+        self.capability_label.setProperty("level", "probing")
+        self.capability_label.setWordWrap(True)
+        self.capability_label.setMinimumHeight(48)
+        self.capability_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        banner_row.addWidget(self.capability_label, 1)
+
+        self.reprobe_btn = QPushButton(" 重新检测")
+        self.reprobe_btn.setIcon(qta.icon('fa6s.rotate', color='#1F1D1A'))
+        self.reprobe_btn.setFixedHeight(30)
+        self.reprobe_btn.clicked.connect(self._probe_capability)
+        banner_row.addWidget(self.reprobe_btn)
+        layout.addLayout(banner_row)
+
+        tip = QLabel("仅对指定网卡生效，断开 WiFi 后规则可能自动清除。wlan0 是 WiFi，eth0 是移动数据（TSU）。")
+        tip.setWordWrap(True)
+        tip.setObjectName("hintLabel")
+        layout.addWidget(tip)
 
         form = QFormLayout()
 
@@ -265,7 +290,128 @@ class WeakNetworkDialog(QDialog):
         tc = self._get_tc_path()
         if not tc:
             return "", "tc 命令未找到，请确认设备已 root 且支持 netem", -1
+        # 没有直接 root 时借用 su 提权（部分设备只有 su，adb root 拿不到）
+        if getattr(self, "_use_su", False) and self.su_path:
+            return self._run_adb_shell_str(f"{self.su_path} -c '{tc} {cmd_args}'")
         return self._run_adb_shell(f"{tc} {cmd_args}")
+
+    def _run_adb_shell_str(self, cmd: str, timeout=10):
+        """整条命令作为单个参数交给设备侧 sh，保留 su -c 里的引号结构"""
+        full_cmd = ["adb", "-s", self.device_serial, "shell", cmd]
+        try:
+            result = subprocess.run(
+                full_cmd, capture_output=True, text=True, timeout=timeout,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
+                encoding='utf-8'
+            )
+            return result.stdout.strip(), result.stderr.strip(), result.returncode
+        except subprocess.TimeoutExpired:
+            return "", "Timeout", -1
+        except Exception as e:
+            return "", str(e), -1
+
+    # ---------------- 设备能力探测（root / tc / netem） ----------------
+    def _find_su(self):
+        for cand in ("su", "/system/bin/su", "/system/xbin/su", "/sbin/su"):
+            out, _, rc = self._run_adb_shell(f"command -v {cand} 2>/dev/null")
+            if rc == 0 and out.strip():
+                return out.strip()
+        return None
+
+    def _detect_privilege(self):
+        """返回 (能否提权, su 路径)。只看不试 adb root —— 那会重启 adbd 让设备断连。"""
+        out, _, _ = self._run_adb_shell("id")
+        if "uid=0" in out:
+            return True, None
+
+        su = self._find_su()
+        if not su:
+            return False, None
+        out2, _, _ = self._run_adb_shell_str(f"{su} -c id")
+        return ("uid=0" in out2), su
+
+    def _probe_netem(self):
+        """
+        往网卡上挂一条最小 netem 规则再删掉，判断内核有没有 sch_netem。
+
+        优先用 lo（不影响业务流量）；lo 上已有规则时换当前选中的网卡试。
+        """
+        candidates = ["lo"]
+        iface = self.iface_combo.currentText().strip()
+        if iface and iface != "lo":
+            candidates.append(iface)
+
+        for dev in candidates:
+            out, err, rc = self._run_tc_cmd(f"qdisc add dev {dev} root netem delay 1ms")
+            text = f"{out} {err}".lower()
+            if rc == 0:
+                self._run_tc_cmd(f"qdisc del dev {dev} root")
+                return True
+            if "file exists" in text or "exclusivity" in text:
+                continue          # 网卡已有规则，换一块再试
+            if "no such file" in text or "not supported" in text:
+                return False      # 明确的「内核不认识 netem」
+        return False
+
+    def _probe_capability(self):
+        if self._probing:
+            return
+        self._probing = True
+        self._set_banner("probing", "正在检测设备能力…")
+        self.reprobe_btn.setEnabled(False)
+
+        def worker():
+            try:
+                has_priv, su = self._detect_privilege()
+                self.su_path = su
+                self._use_su = bool(su)
+                tc = self._get_tc_path() if has_priv else None
+                netem = self._probe_netem() if tc else False
+            except Exception:
+                has_priv, su, tc, netem = False, None, None, False
+            self.capability_ready.emit(bool(has_priv), su or "", tc or "", bool(netem))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @Slot(bool, str, str, bool)
+    def _on_capability_ready(self, has_priv, su_path, tc_path, netem_ok):
+        self._probing = False
+        self.reprobe_btn.setEnabled(True)
+        self.has_privilege = has_priv
+        self.netem_ok = netem_ok
+        if tc_path:
+            self.tc_path = tc_path
+
+        if not has_priv:
+            if su_path:
+                level = "error"
+                text = "⚠ 设备未授权 root：检测到 su，但当前 shell 没有 root 权限 —— 请在手机上同意授权后点「重新检测」"
+            else:
+                level = "error"
+                text = "⚠ 设备未 root：弱网模拟需要 root（调试版可先 adb root，正式版机型通常没有可行路径）"
+        elif not tc_path:
+            level, text = "error", "⚠ 设备上没有 tc 命令，无法做弱网模拟"
+        elif not netem_ok:
+            level, text = "warn", "⚠ 延迟 / 丢包不可用（内核没有 netem 模块）· 仍可限制带宽"
+        else:
+            level, text = "ok", "✅ 本设备支持 netem：延迟 / 丢包 / 带宽限制均可使用"
+
+        self._set_banner(level, text)
+
+        # 内核不支持 netem 时把这两项置灰并清零：填了也不会生效，不如不让填
+        for spin in (self.delay_spin, self.loss_spin):
+            spin.setEnabled(bool(netem_ok))
+        if not netem_ok:
+            self.delay_spin.setValue(0)
+            self.loss_spin.setValue(0)
+
+        self.apply_btn.setEnabled(bool(has_priv and tc_path))
+
+    def _set_banner(self, level: str, text: str):
+        self.capability_label.setText(text)
+        self.capability_label.setProperty("level", level)
+        self.capability_label.style().unpolish(self.capability_label)
+        self.capability_label.style().polish(self.capability_label)
 
     def apply_limit(self):
         if self._processing:
@@ -278,19 +424,20 @@ class WeakNetworkDialog(QDialog):
             self._processing = False
             return
 
-        stdout, _, rc = self._run_adb_shell("id")
-        if "uid=0" not in stdout and "root" not in stdout.lower():
+        if not self.has_privilege:
             self.show_critical_signal.emit(
                 "权限不足",
-                "设备未 root 或 ADB 无 root 权限，无法使用弱网模拟功能。\n请确保设备已 root 并授予 ADB root 权限。"
+                "设备未 root 或没有可用的 su，无法应用弱网规则。\n"
+                "如果这台机器能 root，请先 adb root 或在手机上授权 su，再点「重新检测」。"
             )
             self._processing = False
             return
 
         self._run_tc_cmd(f"qdisc del dev {iface} root 2>/dev/null")
 
-        delay = self.delay_spin.value()
-        loss = self.loss_spin.value()
+        # 内核不支持 netem 时忽略延迟/丢包，只下发带宽规则（与界面上的置灰保持一致）
+        delay = self.delay_spin.value() if self.netem_ok else 0
+        loss = self.loss_spin.value() if self.netem_ok else 0
         bandwidth = self.bandwidth_spin.value()
 
         commands = []
@@ -573,7 +720,7 @@ class WeakNetworkDialog(QDialog):
     def closeEvent(self, event):
         """关闭窗口时自动恢复网络，避免设备残留弱网规则（表现为断网 / 无限卡顿）"""
         if self._processing:
-            QMessageBox.information(self, "提示", "操作正在进行中，请稍候再关闭。")
+            Toast.notify(self, "操作正在进行中，请稍候再关闭。")
             event.ignore()
             return
 
