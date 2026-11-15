@@ -21,6 +21,13 @@ on:
 permissions:
   contents: write
 
+# 固定打包时间戳：PyInstaller 产出的 .pyc 会内嵌时间，不固定的话每次构建
+# 连"没改过的文件"字节都不同，增量补丁会退化成接近全量（虫师踩过这个坑）。
+env:
+  SOURCE_DATE_EPOCH: '1704067200'
+  PYTHONUTF8: '1'
+  PYTHONIOENCODING: 'utf-8' 
+
 jobs:
   release:
     runs-on: windows-latest
@@ -78,7 +85,7 @@ jobs:
           set -u
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VER="${TAG#v}"
-          PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^{}" 2>/dev/null || true)"
+          PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
           if [ -z "$PREV_TAG" ]; then
             echo "没有上一个 tag，跳过增量补丁"; echo "patch=" >> "$GITHUB_OUTPUT"; exit 0
           fi
@@ -94,6 +101,7 @@ jobs:
           OLD_TREE="prev_tree/捕虫师"
           [ -d "$OLD_TREE" ] || OLD_TREE="prev_tree"
           PATCH_OUT="patch-${PREV}-to-${VER}.dpatch"
+          echo "上一个 tag=$PREV_TAG 旧包=$PREV_ZIP 旧树=$OLD_TREE" >> "$GITHUB_STEP_SUMMARY"
           if ! python tools/make_update_patch.py \
                  --old-tree "$OLD_TREE" --new-tree "dist_release/捕虫师" \
                  --from "$PREV" --to "$VER" --out "$PATCH_OUT"; then
@@ -101,6 +109,7 @@ jobs:
             echo "patch=" >> "$GITHUB_OUTPUT"; exit 0
           fi
           echo "patch=$PATCH_OUT" >> "$GITHUB_OUTPUT"
+          echo "补丁产出：$PATCH_OUT（$(du -h "$PATCH_OUT" | cut -f1)）" >> "$GITHUB_STEP_SUMMARY"
 
       - name: 创建或更新 Release
         shell: bash

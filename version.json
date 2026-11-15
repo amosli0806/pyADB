@@ -1,7 +1,7 @@
 {
-  "version": "2.4.1",
-  "release_notes": "增量更新：Release 提供 patch-<旧版本>-to-<新版本>.dpatch 时只下载变化的业务代码，其余文件从本机旧安装复用；补丁异常自动回退全量。",
-  "download_url": "https://github.com/amosli0806/pyADB/releases/download/v2.4.1/bugcatcher-2.4.1-win64.zip",
+  "version": "2.4.2",
+  "release_notes": "修复 CI 生成增量补丁时取错上一个 tag 的问题；固定打包时间戳，使跨版本文件对比可用。",
+  "download_url": "https://github.com/amosli0806/pyADB/releases/download/v2.4.2/bugcatcher-2.4.2-win64.zip",
   "md5": "",
   "force_update": false,
   "min_supported_version": "2.0.0"
