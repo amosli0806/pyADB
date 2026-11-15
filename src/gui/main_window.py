@@ -3,19 +3,21 @@ import hashlib
 import os
 import re
 import sys
+import time
 import subprocess
 import threading
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QToolBar, QPushButton, QLineEdit,
+    QToolBar, QPushButton, QLineEdit, QToolButton,
     QSplitter, QTextEdit, QMenu, QMessageBox, QFileDialog,
-    QDialog, QScrollArea, QGridLayout, QLabel, QProgressDialog
+    QDialog, QScrollArea, QGridLayout, QLabel, QProgressDialog, QSizePolicy, QFrame
 )
 from PySide6.QtCore import Qt, Slot, QTimer
 from PySide6.QtGui import QAction, QIcon, QShortcut, QKeySequence, QTextCursor
 from src.models.command import Command
 from src.gui.device_selector import DeviceSelector
 from src.gui.command_list import CommandListWidget
+from src.gui.pulse import Pulse
 from src.gui.dialogs.wireless_dialog import WirelessDialog
 from src.gui.dialogs.custom_command_dialog import CustomCommandDialog
 from src.core.adb_manager import AdbManager
@@ -31,6 +33,7 @@ import qtawesome as qta
 # 新增导入更新模块
 from src.core.updater import Updater
 from src.utils.version import APP_VERSION
+from src.gui.toast import Toast
 
 
 class FlowLayout(QHBoxLayout):
@@ -70,6 +73,18 @@ class FlowLayout(QHBoxLayout):
             x += size_hint.width() + spacing
             line_height = max(line_height, size_hint.height())
         self._line_height = line_height
+
+
+def _fix_menu_shadow(menu: QMenu):
+    """
+    去掉菜单弹窗的系统投影。
+
+    QSS 给了菜单 8px 圆角，但弹窗本身仍是矩形窗口，系统会给这个矩形画投影，
+    于是圆角外面露出一块直角阴影（右下角最明显）。关掉投影 + 让背景透明，
+    圆角才能真正透出去。
+    """
+    menu.setWindowFlags(menu.windowFlags() | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+    menu.setAttribute(Qt.WA_TranslucentBackground, True)
 
 
 class MainWindow(QMainWindow):
@@ -145,11 +160,49 @@ class MainWindow(QMainWindow):
         self.execute_selected_btn.setText(text)
         self.execute_selected_btn.update()
 
+        # 「执行中…」期间做呼吸灯，和行内停止按钮保持同一套视觉语言
+        if "执行中" in text:
+            self._exec_pulse.start()
+        else:
+            self._exec_pulse.stop()
+
+    def _build_command_menu(self):
+        """
+        左侧「指令管理 ▾」下拉菜单。
+
+        结构参考虫师：导入导出 / 展示 / 增删改 三段，
+        和顶部「菜单」里的同名项复用同一套槽函数，行为完全一致。
+        """
+        menu = QMenu(self)
+        ink = '#1F1D1A'      # 图标用墨色，和整体配色一致
+
+        act_export = menu.addAction(qta.icon('fa6s.file-export', color=ink), "导出指令")
+        act_export.triggered.connect(self.on_export_commands)
+
+        act_import = menu.addAction(qta.icon('fa6s.file-import', color=ink), "导入指令")
+        act_import.triggered.connect(self.on_import_commands)
+
+        # 展示指令：直接弹对话框勾选（原来是二级子菜单，层级太深且和「自定义显示」重复）
+        act_display = menu.addAction(qta.icon('fa6s.eye', color=ink), "展示指令")
+        act_display.triggered.connect(self.on_select_commands)
+
+        act_add = menu.addAction(qta.icon('fa6s.plus', color=ink), "创建指令")
+        act_add.triggered.connect(self.on_add_command)
+
+        act_edit = menu.addAction(qta.icon('fa6s.pen', color=ink), "编辑指令")
+        act_edit.triggered.connect(self.on_edit_command)
+
+        act_del = menu.addAction(qta.icon('fa6s.trash-can', color=ink), "删除指令")
+        act_del.triggered.connect(self.on_delete_command)
+
+        _fix_menu_shadow(menu)
+        return menu
+
     def setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setContentsMargins(12, 9, 12, 12)
         main_layout.setSpacing(10)
 
         # ---------- 工具栏 ----------
@@ -167,29 +220,21 @@ class MainWindow(QMainWindow):
         self.device_selector.device_changed.connect(self.on_device_changed)
         toolbar.addWidget(self.device_selector)
 
-        # ---- 执行选中：全窗口唯一的实心主按钮 ----
+        # ---- 执行选中：全窗口唯一的实心主按钮（放在左侧「指令管理」行，见下方） ----
         self.execute_selected_btn = QPushButton(" 执行选中")
         self.execute_selected_btn.setObjectName("primaryBtn")
+        # 尺寸交给 QSS 的 [compact] 规则：setFixed* 会被样式表的 padding/min-height 顶回来
+        self.execute_selected_btn.setProperty("compact", "true")
         self.execute_selected_btn.clicked.connect(self.on_execute_selected)
-        toolbar.addWidget(self.execute_selected_btn)
 
-        toolbar.addSeparator()
+        # 执行中时做呼吸灯
+        self._exec_pulse = Pulse(self.execute_selected_btn, low=0.5, duration=2000)
 
-        self.path_edit = QLineEdit()
-        self.path_edit.setObjectName("outputPathEdit")
-        self.path_edit.setText(self.current_output_dir)
-        self.path_edit.setPlaceholderText("输出目录")
-        self.path_edit.setReadOnly(True)
-        self.path_edit.setFocusPolicy(Qt.ClickFocus)
-        toolbar.addWidget(self.path_edit)
-
-        # ---- 浏览按钮：次级描边按钮 ----
-        self.browse_btn = QPushButton(" 浏览")
-        self.browse_btn.setIcon(qta.icon('fa6s.folder-open', color='#1F1D1A'))
-        self.browse_btn.clicked.connect(self.on_browse_output_dir)
-        toolbar.addWidget(self.browse_btn)
-
-        toolbar.addSeparator()
+        # 占位撑开，让「菜单」落在工具栏最右侧
+        spacer = QWidget()
+        spacer.setObjectName("toolbarSpacer")     # QSS 里设透明，否则会涂出全局底色
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        toolbar.addWidget(spacer)
 
         # ---- 菜单按钮：次级描边按钮 ----
         self.menu_btn = QPushButton(" 菜单")
@@ -198,125 +243,62 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self)
         # 菜单外观由全局 QSS 的 QMenu 规则统一控制
+        # 指令相关操作（展示/增删改/导入导出）已全部收敛到左侧「指令管理 ▾」，这里不再重复
 
-        # ---------- ① 展示过滤组 ----------
-        show_menu = QMenu ( "展示指令" , self )
-        show_menu.setIcon ( qta.icon ( 'fa6s.folder' , color = '#1F1D1A' ) )
+        # ---------- 设置 & 更新 & 关于 ----------
+        self.settings_action = QAction("设  置", self)
+        self.settings_action.setIcon(qta.icon('fa6s.gear', color='#1F1D1A'))
+        self.settings_action.triggered.connect(self.on_settings)
+        menu.addAction(self.settings_action)
 
-        show_all_action = QAction ( "   显示全部   " , self )
-        show_all_action.setIcon ( qta.icon ( 'fa6s.list' , color = '#1F1D1A' ) )
-        show_all_action.triggered.connect ( lambda : self.on_display_mode_changed ( 'all' ) )
-        show_menu.addAction ( show_all_action )
-
-        show_preset_action = QAction ( " 仅显示预设 " , self )
-        show_preset_action.setIcon ( qta.icon ( 'fa6s.thumbtack' , color = '#1F1D1A' ) )
-        show_preset_action.triggered.connect ( lambda : self.on_display_mode_changed ( 'preset' ) )
-        show_menu.addAction ( show_preset_action )
-
-        show_custom_action = QAction ( "仅显示自定义" , self )
-        show_custom_action.setIcon ( qta.icon ( 'fa6s.screwdriver-wrench' , color = '#1F1D1A' ) )
-        show_custom_action.triggered.connect ( lambda : self.on_display_mode_changed ( 'custom' ) )
-        show_menu.addAction ( show_custom_action )
-
-        show_menu.addSeparator ( )
-        show_select_action = QAction ( " 自定义显示 " , self )
-        show_select_action.setIcon ( qta.icon ( 'fa6s.sliders' , color = '#1F1D1A' ) )
-        show_select_action.triggered.connect ( self.on_select_commands )
-        show_menu.addAction ( show_select_action )
-
-        menu.addMenu ( show_menu )
-
-        menu.addSeparator ( )
-
-        # ---------- ② 指令管理组 ----------
-        self.add_cmd_action = QAction ( "新增指令" , self )
-        self.add_cmd_action.setIcon ( qta.icon ( 'fa6s.plus' , color = '#1F1D1A' ) )
-        self.add_cmd_action.triggered.connect ( self.on_add_command )
-        menu.addAction ( self.add_cmd_action )
-
-        self.edit_cmd_action = QAction ( "编辑指令" , self )
-        self.edit_cmd_action.setIcon ( qta.icon ( 'fa6s.pen' , color = '#1F1D1A' ) )
-        self.edit_cmd_action.triggered.connect ( self.on_edit_command )
-        menu.addAction ( self.edit_cmd_action )
-
-        self.del_cmd_action = QAction ( "删除指令" , self )
-        self.del_cmd_action.setIcon ( qta.icon ( 'fa6s.trash-can' , color = '#1F1D1A' ) )
-        self.del_cmd_action.triggered.connect ( self.on_delete_command )
-        menu.addAction ( self.del_cmd_action )
-
-        menu.addSeparator ( )
-
-        # ---------- ③ 数据管理组 ----------
-        self.export_cmd_action = QAction ( "导出指令" , self )
-        self.export_cmd_action.setIcon ( qta.icon ( 'fa6s.download' , color = '#1F1D1A' ) )
-        self.export_cmd_action.triggered.connect ( self.on_export_commands )
-        menu.addAction ( self.export_cmd_action )
-
-        self.import_cmd_action = QAction ( "导入指令" , self )
-        self.import_cmd_action.setIcon ( qta.icon ( 'fa6s.upload' , color = '#1F1D1A' ) )
-        self.import_cmd_action.triggered.connect ( self.on_import_commands )
-        menu.addAction ( self.import_cmd_action )
-
-        menu.addSeparator ( )
-
-        # ---------- ④ 工具 & 帮助组 ----------
-        self.shortcut_action = QAction ( "快 捷 键" , self )
-        self.shortcut_action.setIcon ( qta.icon ( 'fa6s.keyboard' , color = '#1F1D1A' ) )
-        self.shortcut_action.triggered.connect ( self.on_shortcut_settings )
-        menu.addAction ( self.shortcut_action )
-
-        self.help_action = QAction ( "帮助中心" , self )
-        self.help_action.setIcon ( qta.icon ( 'fa6s.circle-question' , color = '#1F1D1A' ) )
-        self.help_action.triggered.connect ( self.on_help )
-        menu.addAction ( self.help_action )
-
-        # ---- 新增：检查更新 ----
         self.update_action = QAction("检查更新", self)
         self.update_action.setIcon(qta.icon('fa6s.cloud-arrow-up', color='#1F1D1A'))
         self.update_action.triggered.connect(self.on_check_update)
         menu.addAction(self.update_action)
-
-        menu.addSeparator()
 
         self.about_action = QAction ( "  关  于 " , self )
         self.about_action.setIcon ( qta.icon ( 'fa6s.circle-info' , color = '#1F1D1A' ) )
         self.about_action.triggered.connect ( self.on_about )
         menu.addAction ( self.about_action )
 
+        _fix_menu_shadow(menu)
         self.menu_btn.setMenu ( menu )
         toolbar.addWidget ( self.menu_btn )
 
-        # ---- 清空日志：破坏性操作，描边砖红 ----
+        # ---- 清空日志：破坏性操作，描边砖红（放在「运行日志」标题行右侧） ----
         self.clear_log_btn = QPushButton(" 清空")
         self.clear_log_btn.setIcon(qta.icon('fa6s.trash-can', color='#A6402F'))
         self.clear_log_btn.setObjectName("dangerBtn")
+        self.clear_log_btn.setProperty("compact", "true")   # 26px 高，和「执行选中」同档
         self.clear_log_btn.clicked.connect(self.on_clear_log)
-        toolbar.addWidget(self.clear_log_btn)
 
         # ---------- 主分割器 ----------
         splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(splitter)
 
-        # 左侧：搜索框 + 命令列表
-        left_widget = QWidget()
+        # 左侧：整块做成一张卡片（标题行 + 列表共用同一个边框），参考虫师的 LeftGroup
+        left_widget = QFrame()
+        left_widget.setObjectName("leftGroup")
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setContentsMargins(10, 8, 10, 10)
+        left_layout.setSpacing(8)
 
-        search_layout = QHBoxLayout()
-        search_layout.setSpacing(8)
-        self.search_edit = QLineEdit()
-        self.search_edit.setObjectName("searchEdit")
-        self.search_edit.setPlaceholderText("搜索预设 / 自定义 / ADB 库中的指令")
-        self.search_edit.returnPressed.connect(self.on_search_from_box)
-        search_layout.addWidget(self.search_edit)
+        # ---------- 标题行：指令管理 ▾  +  执行选中 ----------
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
 
-        # ---- 查找按钮：次级描边 ----
-        self.search_btn = QPushButton(" 查找")
-        self.search_btn.setIcon(qta.icon('fa6s.magnifying-glass', color='#1F1D1A'))
-        self.search_btn.clicked.connect(self.on_search_from_box)
-        search_layout.addWidget(self.search_btn)
+        self.command_menu_btn = QToolButton()
+        self.command_menu_btn.setObjectName("commandMenuBtn")
+        self.command_menu_btn.setText("指令管理 ▾")
+        self.command_menu_btn.setPopupMode(QToolButton.InstantPopup)
+        self.command_menu_btn.setCursor(Qt.PointingHandCursor)
+        self.command_menu_btn.setFixedHeight(30)
+        self.command_menu_btn.setMenu(self._build_command_menu())
+        title_row.addWidget(self.command_menu_btn)
 
-        left_layout.addLayout(search_layout)
+        title_row.addStretch()
+        title_row.addWidget(self.execute_selected_btn)
+        left_layout.addLayout(title_row)
 
         self.command_list = CommandListWidget(self.command_manager)
         left_layout.addWidget(self.command_list)
@@ -328,46 +310,57 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 1, 0)
 
-        # ---------- 快捷功能栏（图标暂未迁移，后续修改） ----------
-        quick_buttons = [
-            ("无线" , self.on_wireless , 'fa6s.wifi') ,
-            ("投屏" , self.on_scrcpy , 'fa6s.desktop') ,
-            ("安装" , self.on_install_app , 'fa6s.box') ,
-            ("推送" , self.on_push_file_folder , 'fa6s.upload') ,
-            ("应用管理" , self.on_app_manager , 'fa6s.list') ,
-            ("硬件" , self.on_device_info , 'fa6s.microchip') ,
-            ("堆转储" , self.on_hprof_dump , 'fa6s.database') ,
-            ("Monkey" , self.on_monkey , 'fa6s.robot') ,
-            ("Crash" , self.on_crash_log , 'fa6s.bug') ,
-            ("ANR" , self.on_anr_analyzer , 'fa6s.hourglass-half') ,
-            ("MD5" , self.on_md5_query , 'fa6s.key') ,
-            ("弱网" , self.on_weak_network , 'fa6s.signal') ,
-            ("抓包" , self.on_packet_capture , 'fa6s.network-wired') ,
-        ]
+        # ---------- 快捷功能栏：分组定义见下方 groups ----------
 
         # 创建容器和网格布局
         quick_widget = QWidget()
         quick_widget.setObjectName("quickPanel")
         quick_layout = QGridLayout(quick_widget)
-        quick_layout.setContentsMargins(6, 6, 6, 6)
+        quick_layout.setContentsMargins(8, 8, 8, 8)
         quick_layout.setHorizontalSpacing(4)
-        quick_layout.setVerticalSpacing(2)
+        quick_layout.setVerticalSpacing(3)
 
-        cols = 7
-        for idx , (text , slot , icon_name) in enumerate ( quick_buttons ) :
-            row = idx // cols
-            col = idx % cols
-            btn = QPushButton ( f" {text}" )
-            btn.setObjectName("quickBtn")
-            btn.setIcon ( qta.icon ( icon_name , color = '#1F1D1A' ) )
-            btn.setFixedWidth ( 100 )
-            btn.setFixedHeight ( 30 )
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect ( slot )
-            quick_layout.addWidget ( btn , row , col )
+        # 按用途分三组：找东西时先定位到组，再在组内扫 —— 比在一排 13 个图标里找快得多
+        # 注意按名字显式列，别按下标切片：原列表里 Monkey/MD5 的位置和分组顺序不一致
+        groups = [
+            ("设备", [
+                ("无线", self.on_wireless, 'fa6s.wifi'),
+                ("投屏", self.on_scrcpy, 'fa6s.desktop'),
+                ("安装", self.on_install_app, 'fa6s.box'),
+                ("推送", self.on_push_file_folder, 'fa6s.upload'),
+            ]),
+            ("查看", [
+                ("应用管理", self.on_app_manager, 'fa6s.list'),
+                ("硬件", self.on_device_info, 'fa6s.microchip'),
+                ("堆转储", self.on_hprof_dump, 'fa6s.database'),
+                ("MD5", self.on_md5_query, 'fa6s.key'),
+            ]),
+            ("测试", [
+                ("Monkey", self.on_monkey, 'fa6s.robot'),
+                ("Crash", self.on_crash_log, 'fa6s.bug'),
+                ("ANR", self.on_anr_analyzer, 'fa6s.hourglass-half'),
+                ("弱网", self.on_weak_network, 'fa6s.signal'),
+                ("抓包", self.on_packet_capture, 'fa6s.network-wired'),
+            ]),
+        ]
 
-        for col in range(cols):
-            quick_layout.setColumnStretch(col, 0)
+        for row, (group_name, items) in enumerate(groups):
+            label = QLabel(group_name)
+            label.setObjectName("quickGroupLabel")
+            label.setFixedWidth(30)
+            quick_layout.addWidget(label, row, 0, Qt.AlignVCenter)
+
+            for col, (text, slot, icon_name) in enumerate(items, start=1):
+                btn = QPushButton(f" {text}")
+                btn.setObjectName("quickBtn")
+                btn.setIcon(qta.icon(icon_name, color='#1F1D1A'))
+                btn.setFixedWidth(98)      # 等宽：不再因为「无线」和「应用管理」字数不同而参差
+                btn.setFixedHeight(30)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.clicked.connect(slot)
+                quick_layout.addWidget(btn, row, col)
+
+        quick_layout.setColumnStretch(len(max(groups, key=lambda g: len(g[1]))[1]) + 1, 1)
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -387,20 +380,53 @@ class MainWindow(QMainWindow):
         """)
         scroll_area.setWidget(quick_widget)
 
-        quick_label = QLabel("快 捷 工 具")
-        quick_label.setObjectName("sectionLabel")
+        # 这一行只放搜索：右侧快捷工具区本身有图标，不需要再顶一行文案
+        self.search_edit = QLineEdit()
+        self.search_edit.setObjectName("searchEdit")
+        self.search_edit.setPlaceholderText("搜索预设 / 自定义 / ADB 库中的指令")
+        self.search_edit.setMinimumWidth(240)   # 不再固定宽度：占满「查找」左侧的全部空间
+        self.search_edit.setFixedHeight(30)      # 与左侧「指令管理」行等高，两行基线才对齐
+        self.search_edit.returnPressed.connect(self.on_search_from_box)
+
+        self.search_btn = QPushButton(" 查找")
+        self.search_btn.setIcon(qta.icon('fa6s.magnifying-glass', color='#1F1D1A'))
+        self.search_btn.setFixedHeight(30)
+        self.search_btn.clicked.connect(self.on_search_from_box)
+
+        head_row = QHBoxLayout()
+        head_row.setSpacing(8)
+        head_row.setContentsMargins(0, 0, 0, 0)   # 紧贴列顶：和左侧卡片的上边框齐平
+        head_row.addWidget(self.search_edit, 1)   # 占满整行，只在右侧给「查找」留位置
+        head_row.addWidget(self.search_btn)
+
         right_layout.setSpacing(8)
-        right_layout.addWidget(quick_label)
+        right_layout.addLayout(head_row)
         right_layout.addWidget(scroll_area)
 
+        # ---- 运行日志：文案与清空按钮放进输出框顶部（同一张卡片，不再单独占一行） ----
+        log_card = QFrame()
+        log_card.setObjectName("logGroup")
+        log_card_layout = QVBoxLayout(log_card)
+        log_card_layout.setContentsMargins(10, 4, 10, 10)   # 顶部只留 4px，标题贴近卡片上沿
+        log_card_layout.setSpacing(5)
+
+        log_label = QLabel("运行日志")
+        log_label.setObjectName("panelTitle")   # 与「指令管理」同一档字号
+
+        log_head = QHBoxLayout()
+        log_head.setSpacing(8)
+        log_head.addWidget(log_label)
+        log_head.addStretch()
+        log_head.addWidget(self.clear_log_btn)
+        log_card_layout.addLayout(log_head)
+
         self.log_output = QTextEdit()
+        self.log_output.setObjectName("logOutput")
         self.log_output.setReadOnly(True)
         self.log_output.setLineWrapMode(QTextEdit.WidgetWidth)
+        log_card_layout.addWidget(self.log_output, 1)
 
-        log_label = QLabel("运 行 日 志")
-        log_label.setObjectName("sectionLabel")
-        right_layout.addWidget(log_label)
-        right_layout.addWidget(self.log_output, stretch=1)
+        right_layout.addWidget(log_card, 1)
 
         splitter.addWidget(right_widget)
         splitter.setSizes([430, 630])
@@ -440,7 +466,6 @@ class MainWindow(QMainWindow):
             ("weak_network", self.on_weak_network),
             ("export_commands", self.on_export_commands),
             ("import_commands", self.on_import_commands),
-            ("help_center", self.on_help),
             ("packet_capture", self.on_packet_capture),
             ("about", self.on_about),
         ]
@@ -494,7 +519,7 @@ class MainWindow(QMainWindow):
                 self._release_updater()
         else:
             if msg:
-                QMessageBox.information(self, "检查更新", msg)
+                Toast.notify(self, msg)
             self._release_updater()
 
     def _start_download(self, update_info):
@@ -561,15 +586,13 @@ class MainWindow(QMainWindow):
             msg.deleteLater()      # 以 self 为父对象，不销毁会一直累积
 
     def show_warning(self, title, text):
-        msg = QMessageBox(self)
-        msg.setWindowTitle(title)
-        msg.setText(text)
-        msg.setIcon(QMessageBox.Warning)
-        msg.setFixedWidth(500)
-        try:
-            msg.exec()
-        finally:
-            msg.deleteLater()
+        """
+        轻量提示：底部浮出 toast，不再弹模态框。
+
+        这类消息大多是「本次操作被跳过」（未检测到设备 / 请先勾选指令），
+        弹框会打断操作节奏，还要多点一次 OK。真正需要用户决策的场合仍用 QMessageBox。
+        """
+        Toast.notify(self, text, duration=2800)
 
     def show_question(self, title, text):
         msg = QMessageBox(self)
@@ -587,9 +610,9 @@ class MainWindow(QMainWindow):
     def on_device_changed(self, serial):
         self.adb_manager.set_current_device(serial)
         if serial:
-            self.append_log(f"<span style='color:#3E6E8E;'>📱 {get_timestamp()} 当前设备切换为: {serial}</span>")
+            self.append_log(f"<span style='color:#3E6E8E;'>📱 当前设备切换为 {serial}</span>")
         else:
-            self.append_log(f"<span style='color:#A6402F;'>📵 {get_timestamp()} 当前无可用设备</span>")
+            self.append_log("<span style='color:#A6402F;'>📵 当前无可用设备</span>")
 
     @Slot()
     def on_execute_selected(self):
@@ -597,7 +620,7 @@ class MainWindow(QMainWindow):
             return
         selected = self.command_list.get_selected_commands()
         if not selected:
-            QMessageBox.information(self, "提示", "           请至少勾选一个命令          ")
+            Toast.notify(self, "           请至少勾选一个命令          ")
             return
 
         # ---- 新增：检查已勾选的命令中是否有正在运行的 ----
@@ -623,14 +646,17 @@ class MainWindow(QMainWindow):
         self.log_output.setFocus()
         for cmd in selected:
             self.command_list.set_command_state(cmd.id, 'starting')
-            self.adb_manager.execute_command(cmd, current_device, self.path_edit.text())
+            self.adb_manager.execute_command(cmd, current_device, self.current_output_dir)
 
     @Slot()
-    def on_browse_output_dir(self):
-        dir_path = QFileDialog.getExistingDirectory(self, "选择输出目录", self.path_edit.text())
-        if dir_path:
-            self.path_edit.setText(dir_path)
-            Settings.set_output_dir(dir_path)
+    def on_settings(self):
+        """设置面板：输出目录 + 快捷键（原来这两项分散在工具栏和独立弹窗里）"""
+        from src.gui.dialogs.settings_dialog import SettingsDialog
+        dlg = SettingsDialog(self.current_output_dir, self)
+        if self._exec_dialog(dlg):
+            self.current_output_dir = dlg.output_dir
+            Settings.set_output_dir(dlg.output_dir)
+            self.apply_shortcuts()      # 快捷键可能在面板里改过，重新注册一遍
 
     @Slot()
     def on_add_command(self):
@@ -645,10 +671,10 @@ class MainWindow(QMainWindow):
     def on_edit_command(self):
         selected = self.command_list.get_selected_commands()
         if not selected:
-            QMessageBox.warning(self, "提示", "       请先勾选一条指令        ")
+            Toast.notify(self, "       请先勾选一条指令        ")
             return
         if len(selected) > 1:
-            QMessageBox.warning(self, "提示", "       请仅勾选一条指令进行编辑        ")
+            Toast.notify(self, "       请仅勾选一条指令进行编辑        ")
             return
         cmd = selected[0]
         dlg = CustomCommandDialog(self, cmd)
@@ -662,7 +688,7 @@ class MainWindow(QMainWindow):
     def on_delete_command ( self ) :
         selected = self.command_list.get_selected_commands ( )
         if not selected :
-            QMessageBox.warning ( self , "提示" , "       请至少选中一条指令       " )
+            Toast.notify(self, "       请至少选中一条指令       ")
             return
 
         # 检查是否有正在运行的命令
@@ -679,7 +705,7 @@ class MainWindow(QMainWindow):
 
         # 如果全部是预设命令
         if not custom_cmds :
-            QMessageBox.warning ( self , "无法删除" , "       预设命令不可删除，请取消勾选后重试       " )
+            Toast.notify(self, "       预设命令不可删除，请取消勾选后重试       ")
             return
 
         # 如果有预设命令，提示用户预设将被跳过
@@ -763,7 +789,7 @@ class MainWindow(QMainWindow):
         from src.gui.dialogs.screen_mirror_dialog import ScreenMirrorDialog
         self._mirror_dialog = ScreenMirrorDialog(
             current_device, device_model,
-            self.path_edit.text(),
+            self.current_output_dir,
             self
         )
         self._mirror_dialog.destroyed.connect(self._on_mirror_dialog_destroyed)
@@ -771,241 +797,12 @@ class MainWindow(QMainWindow):
         self._mirror_dialog.raise_()
         self._mirror_dialog.activateWindow()
 
-    @Slot ( )
-    def on_about ( self ) :
-        about_html = """
-        <style>
-            body {
-                font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
-                margin: 0;
-                padding: 20px 24px;
-                background-color: #ffffff;
-                line-height: 1.7;
-                color: #1F1D1A;
-            }
-            h1 {
-                color: #1F1D1A;
-                font-size: 24px;
-                margin-top: 0;
-                margin-bottom: 4px;
-                border-bottom: 3px solid #3E6E8E;
-                padding-bottom: 10px;
-            }
-            .subtitle {
-                color: #6E675D;
-                font-size: 14px;
-                margin-bottom: 18px;
-            }
-            h3 {
-                color: #1F1D1A;
-                font-size: 15px;
-                margin-top: 16px;
-                margin-bottom: 6px;
-            }
-            ul {
-                margin: 2px 0 10px 18px;
-                padding: 0;
-            }
-            li {
-                margin: 3px 0;
-                font-size: 13px;
-                color: #1F1D1A;
-            }
-            .version {
-                font-size: 18px;
-                color: #335B75;
-                font-weight: bold;
-            }
-            .footer {
-                margin-top: 16px;
-                font-size: 12px;
-                color: #9C9488;
-                text-align: right;
-                border-top: 1px solid #F6F4F0;
-                padding-top: 10px;
-            }
-            a {
-                color: #335B75;
-                text-decoration: none;
-            }
-            a:hover {
-                text-decoration: underline;
-            }
-            .info-grid {
-                display: grid;
-                grid-template-columns: 65px 1fr;
-                gap: 2px 12px;
-                font-size: 13px;
-                color: #1F1D1A;
-                background: #FBFAF7;
-                padding: 10px 14px;
-                border-radius: 6px;
-                margin-bottom: 12px;
-            }
-            .info-grid .label {
-                color: #6E675D;
-            }
-            .info-grid .value {
-                font-weight: 500;
-            }
-            .tag {
-                display: inline-block;
-                background: #2F6B45;
-                color: #fff;
-                font-size: 11px;
-                padding: 0 10px;
-                border-radius: 3px;
-                margin-left: 6px;
-            }
-            .tag-blue {
-                background: #3E6E8E;
-            }
-            .changelog li {
-                list-style: none;
-                margin-left: -10px;
-            }
-            .changelog li::before {
-                content: "✅ ";
-            }
-            .changelog li.fix::before {
-                content: "🔧 ";
-            }
-            .changelog li.new::before {
-                content: "✨ ";
-            }
-            .changelog li.opt::before {
-                content: "⚡ ";
-            }
-            .changelog li.ui::before {
-                content: "🎨 ";
-            }
-            .key-grid {
-                display: grid;
-                grid-template-columns: 110px 1fr;
-                gap: 2px 14px;
-                font-size: 12px;
-                color: #1F1D1A;
-            }
-            .key-grid .key {
-                color: #6E675D;
-            }
-            .key-grid .desc {
-                color: #1F1D1A;
-            }
-            .feature-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 2px 20px;
-                font-size: 13px;
-                color: #1F1D1A;
-                margin: 2px 0 6px 0;
-            }
-            .feature-grid .item {
-                padding: 2px 0;
-            }
-            .feature-grid .item::before {
-                content: "• ";
-                color: #3E6E8E;
-            }
-        </style>
-
-        <h1>🐞 捕虫师</h1>
-        <div class="subtitle">一款面向 Android 开发与测试人员的 ADB 图形化效率工具</div>
-
-        <div class="info-grid">
-            <span class="label">版本</span>
-            <span class="value">{APP_VERSION_TAG} <span class="tag">Release</span></span>
-            <span class="label">开发者</span>
-            <span class="value">李金钊</span>
-            <span class="label">反馈</span>
-            <span class="value"><a href="mailto:1573553463@qq.com">1573553463@qq.com</a></span>
-        </div>
-
-        <h3>✨ 核心特性</h3>
-        <div class="feature-grid">
-            <div class="item">设备管理与无线联调</div>
-            <div class="item">40+ 预设 ADB 命令</div>
-            <div class="item">自定义指令管理</div>
-            <div class="item">实时日志抓取</div>
-            <div class="item">应用管理（安装/卸载/清除）</div>
-            <div class="item">Monkey 测试图形化配置</div>
-            <div class="item">网络抓包（tcpdump）</div>
-            <div class="item">弱网模拟（netem）</div>
-            <div class="item">ANR / Crash 日志分析</div>
-            <div class="item">hprof 堆转储</div>
-            <div class="item">设备信息查看</div>
-            <div class="item">文件推送</div>
-            <div class="item">设备投屏（scrcpy）</div>
-            <div class="item">MD5 查询</div>
-            <div class="item">联网自动更新</div>
-        </div>
-
-        <h3>📋 更新日志</h3>
-        <ul class="changelog">
-            <li class="new">✨ 新增联网自动更新功能（支持 Gitee 源）</li>
-            <li class="ui">🎨 全面替换按钮图标为 Font Awesome 图标，统一视觉风格</li>
-            <li class="ui">🎨 优化按钮禁用状态：禁用时清除图标仅显示纯文本，避免视觉干扰</li>
-            <li class="ui">🎨 优化多个对话框的焦点行为，打开时输入框不再自动获取焦点</li>
-            <li class="opt">⚡ 命令列表项的执行/停止按钮增加图标（idle 显示播放，running 显示停止）</li>
-            <li class="opt">⚡ 弱网模拟按钮点击不再导致另一个按钮闪烁</li>
-            <li class="fix">🔧 修复若干界面细节问题，提升交互流畅度</li>
-            <li class="new">✨ 新增快捷键设置页面图标</li>
-            <li class="ui">🎨 更新帮助中心与关于页面内容</li>
-        </ul>
-
-        <h3>⌨️ 常用快捷键</h3>
-        <div class="key-grid">
-            <span class="key">F5</span><span class="desc">刷新设备列表</span>
-            <span class="key">M</span><span class="desc">执行选中的命令</span>
-            <span class="key">Delete</span><span class="desc">清空日志窗口</span>
-            <span class="key">Ctrl+F</span><span class="desc">搜索指令</span>
-            <span class="key">Ctrl+N</span><span class="desc">新增指令</span>
-            <span class="key">Ctrl+E</span><span class="desc">编辑指令</span>
-            <span class="key">Ctrl+D</span><span class="desc">删除指令</span>
-            <span class="key">Ctrl+W</span><span class="desc">无线联调</span>
-            <span class="key">Ctrl+P</span><span class="desc">设备投屏</span>
-            <span class="key">Ctrl+I</span><span class="desc">安装应用</span>
-            <span class="key">Ctrl+U</span><span class="desc">推送文件</span>
-            <span class="key">Ctrl+A</span><span class="desc">应用管理</span>
-            <span class="key">Ctrl+H</span><span class="desc">硬件信息</span>
-            <span class="key">Ctrl+J</span><span class="desc">hprof 堆转储</span>
-            <span class="key">Ctrl+M</span><span class="desc">Monkey 测试</span>
-            <span class="key">Ctrl+L</span><span class="desc">崩溃日志</span>
-            <span class="key">Ctrl+R</span><span class="desc">ANR 分析</span>
-            <span class="key">Ctrl+Q</span><span class="desc">MD5 查询</span>
-            <span class="key">Ctrl+Y</span><span class="desc">弱网模拟</span>
-            <span class="key">Ctrl+G</span><span class="desc">网络抓包</span>
-            <span class="key">F1</span><span class="desc">帮助中心</span>
-        </div>
-        <p style="font-size: 12px; color: #9C9488; margin-top: 4px;">💡 更多快捷键可在「菜单 → 快捷键设置」中自定义</p>
-
-        <div class="footer">
-            捕虫师 —— 让 Android 调试更简单
-        </div>
-        """
-
-        dialog = QDialog ( self )
-        dialog.setWindowTitle ( "关于" )
-        dialog.resize ( 540 , 580 )
-
-        layout = QVBoxLayout ( dialog )
-        layout.setContentsMargins ( 0 , 0 , 0 , 0 )
-
-        text_edit = QTextEdit ( )
-        text_edit.setReadOnly ( True )
-        text_edit.setHtml ( about_html.replace ( "{APP_VERSION_TAG}" , f"V{APP_VERSION}" ) )
-        text_edit.setStyleSheet (
-            """
-            QTextEdit {
-                background-color: white;
-                border: none;
-                font-size: 13px;
-            }
-        """
-            )
-        layout.addWidget ( text_edit )
-
-        dialog.exec ( )
+    @Slot()
+    def on_about(self):
+        """关于：紧凑一屏信息（排版参考虫师），不再是一整页滚动的富文本"""
+        from src.gui.dialogs.about_dialog import AboutDialog
+        dlg = AboutDialog(self)
+        self._exec_dialog(dlg)
 
     @Slot()
     def on_clear_log(self):
@@ -1013,7 +810,16 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def append_log(self, text):
-        # 添加新日志
+        """
+        所有日志行的统一入口：自动补行首时间戳。
+
+        为什么放在这里而不是各个调用点：日志有 30 多处来源，逐处补时间迟早会漏，
+        而且格式一会儿带毫秒一会儿不带。在这里统一成 HH:MM:SS + 浅灰，
+        等宽字体下整列自然对齐（设计稿里那种效果）。
+        """
+        if not re.match(r"^\s*(<span[^>]*>\s*)?\d{1,2}:\d{2}:\d{2}", text):
+            stamp = f"<span style='color:#9C9488;'>{time.strftime('%H:%M:%S')}</span>&nbsp;&nbsp;"
+            text = stamp + text
         self.log_output.append(text)
 
         # 限制日志显示行数为 25 行
@@ -1067,7 +873,7 @@ class MainWindow(QMainWindow):
             self.command_list.set_command_state(command.id, 'idle')
             return
         self.command_list.set_command_state(command.id, 'starting')
-        self.adb_manager.execute_command(command, current_device, self.path_edit.text())
+        self.adb_manager.execute_command(command, current_device, self.current_output_dir)
 
     @Slot(Command)
     def on_stop_command(self, command):
@@ -1083,12 +889,12 @@ class MainWindow(QMainWindow):
     def on_search_from_box(self):
         keyword = self.search_edit.text().strip()
         if not keyword:
-            QMessageBox.information(self, "提示", "   请输入搜索关键词    ")
+            Toast.notify(self, "   请输入搜索关键词    ")
             return
         results = self.command_manager.search_all(keyword)
         total = (len(results["preset"]) + len(results["custom"]) + len(results["adb_library"]))
         if total == 0:
-            QMessageBox.information(self, "搜索结果", f"未找到与“{keyword}”相关的命令")
+            Toast.notify(self, f"未找到与“{keyword}”相关的命令")
             return
         dialog = SearchResultsDialog(results, self)
         dialog.set_keyword(keyword)
@@ -1551,7 +1357,7 @@ class MainWindow(QMainWindow):
 
     def _dump_hprof(self, pid):
         current_device = self.device_selector.current_device()
-        output_dir = self.path_edit.text()
+        output_dir = self.current_output_dir
         timestamp = get_timestamp().replace(":", "-")
         safe_serial = current_device.replace(':', '_')
         device_output_dir = os.path.join(output_dir, safe_serial)
@@ -1613,9 +1419,7 @@ class MainWindow(QMainWindow):
         if file_path:
             try:
                 self.command_manager.export_custom_commands(file_path)
-                QMessageBox.information(
-                    self, "成功", f"    已导出 {len(self.command_manager.get_custom_commands())} 条指令  "
-                )
+                Toast.notify(self, f"    已导出 {len(self.command_manager.get_custom_commands())} 条指令  ")
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"导出失败: {str(e)}")
 
@@ -1643,16 +1447,9 @@ class MainWindow(QMainWindow):
                 error_msg += f"\n... 共 {len(errors)} 条错误"
             QMessageBox.warning(self, "导入完成", f"成功导入 {success} 条指令\n\n错误信息:\n{error_msg}")
         else:
-            QMessageBox.information(self, "导入成功", f"成功导入 {success} 条指令")
+            Toast.notify(self, f"成功导入 {success} 条指令")
         self.command_list.refresh()
         self._apply_display_filter()
-
-    @Slot()
-    def on_shortcut_settings(self):
-        from src.gui.dialogs.shortcut_settings_dialog import ShortcutSettingsDialog
-        dlg = ShortcutSettingsDialog(self)
-        dlg.shortcuts_changed.connect(self.apply_shortcuts)
-        self._exec_dialog(dlg)
 
     @Slot()
     def on_packet_capture(self):
@@ -1661,7 +1458,7 @@ class MainWindow(QMainWindow):
             self.show_warning("提示", "未检测到可用设备，请连接 Android 设备并授权 USB 调试")
             return
         from src.gui.dialogs.packet_capture_dialog import PacketCaptureDialog
-        dlg = PacketCaptureDialog(self.adb_manager, current_device, self.path_edit.text(), self)
+        dlg = PacketCaptureDialog(self.adb_manager, current_device, self.current_output_dir, self)
         self._exec_dialog(dlg)
 
     @Slot()

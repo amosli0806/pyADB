@@ -765,7 +765,7 @@ class AdbCommandRunnable(QRunnable):
                 self._kill_process_tree(self.process)
 
         if self._is_multi_command and sub_results and not self._stopped and not self.is_monkey :  # Monkey 不显示汇总
-            if self.command.name not in ["截图", "权限获取"]:
+            if self.command.name not in ["截图", "权限获取", "root权限获取"]:
                 success_count = sum(1 for _, ok in sub_results if ok)
                 total = len(sub_results)
                 if success_count == total:

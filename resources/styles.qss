@@ -60,6 +60,11 @@ QToolBar::separator {
     margin: 4px 6px;
 }
 
+/* 工具栏里的弹性占位块：必须透明，否则会盖上一层全局底色 */
+QWidget#toolbarSpacer {
+    background-color: transparent;
+}
+
 /* ==================== 输入框 ==================== */
 QLineEdit {
     background-color: #FFFFFF;
@@ -108,6 +113,7 @@ QComboBox {
 QComboBox:hover {
     border-color: #CFC7BA;
 }
+
 
 QComboBox:focus {
     border-color: #2F6B45;
@@ -170,6 +176,22 @@ QPushButton#primaryBtn {
     color: #FFFFFF;
     border: 1px solid #2F6B45;
     padding: 6px 16px;
+}
+
+/* 日志标题行里的「清空」：同样 26px 高，但宽度随文字 */
+QPushButton#dangerBtn[compact="true"] {
+    padding: 2px 10px;
+    min-height: 20px;
+    max-height: 20px;
+}
+
+/* 卡片标题行里的紧凑版：26px 高、96px 宽（文案在「执行选中/执行中...」间切换时不缩放） */
+QPushButton#primaryBtn[compact="true"] {
+    padding: 2px 16px;
+    min-height: 20px;
+    max-height: 20px;
+    min-width: 62px;   /* Qt 的 min/max-width 是内容盒：62 + 左右 padding 32 + 边框 2 = 96 */
+    max-width: 62px;
 }
 
 QPushButton#primaryBtn:hover {
@@ -344,6 +366,58 @@ QPushButton#runBtn[state="busy"] {
     color: #B3ACA0;
 }
 
+/* ==================== 快捷工具分组标签 / 设备信息 chips ==================== */
+QLabel#quickGroupLabel {
+    color: #9C9488;
+    font-size: 11px;
+    letter-spacing: 1px;
+}
+
+QLabel#deviceChip {
+    background-color: #F4F1EA;
+    color: #6E675D;
+    border-radius: 5px;
+    padding: 3px 8px;
+    font-size: 11px;
+}
+
+/* ==================== 运行日志卡片 ==================== */
+/* 标题与清空按钮贴在输出框顶部，卡片出边框，文本框自己不再画边框 */
+QFrame#logGroup {
+    background-color: #FFFFFF;
+    border: 1px solid #E3DED5;
+    border-radius: 8px;
+}
+
+QTextEdit#logOutput {
+    background-color: transparent;
+    border: none;
+    border-radius: 0px;
+    padding: 0px;
+}
+
+/* ==================== 左侧指令卡片 ==================== */
+/* 标题行和列表共用一张卡片：卡片出边框，列表自己不再画边框 */
+QFrame#leftGroup {
+    background-color: #FFFFFF;
+    border: 1px solid #E3DED5;
+    border-radius: 8px;
+}
+
+QListWidget#commandList {
+    background-color: transparent;
+    border: none;
+    border-radius: 0px;
+    padding: 0px;
+}
+
+/* 选中/悬停都不上色：这一列的状态只由复选框和浅绿底表达。
+   不关掉的话，点过的行会留下一条米色底，看起来像"取消勾选后没清干净"。 */
+QListWidget#commandList::item:selected,
+QListWidget#commandList::item:hover {
+    background-color: transparent;
+}
+
 /* ==================== 命令列表 ==================== */
 QListWidget {
     background-color: #FFFFFF;
@@ -373,6 +447,11 @@ QWidget#commandRow {
     background-color: transparent;
 }
 
+/* 已勾选的行：浅绿底 + 墨绿标题，一眼能看出哪些会被执行 */
+QWidget#commandRow[checked="true"] {
+    background-color: #EDF4EF;
+}
+
 QWidget#commandRow QLabel {
     background-color: transparent;
 }
@@ -391,10 +470,6 @@ QCheckBox::indicator {
     border: 1px solid #CFC7BA;
     border-radius: 4px;
     background-color: #FFFFFF;
-}
-
-QCheckBox::indicator:hover {
-    border-color: #2F6B45;
 }
 
 QCheckBox::indicator:checked {
@@ -488,12 +563,6 @@ QMenu::item:selected {
     color: #1F1D1A;
 }
 
-QMenu::separator {
-    height: 1px;
-    background-color: #E3DED5;
-    margin: 6px 8px;
-}
-
 /* 隐藏菜单按钮右侧的下拉箭头 */
 QPushButton#menuButton::menu-indicator {
     image: none;
@@ -501,7 +570,44 @@ QPushButton#menuButton::menu-indicator {
     height: 0px;
 }
 
+/* ==================== 指令管理下拉（QToolButton） ==================== */
+/* 它是区块标题而不是按钮：无边框、无底色，只有悬停时的颜色变化 */
+QToolButton#commandMenuBtn {
+    background-color: transparent;
+    color: #3A352E;
+    border: none;
+    padding: 0px 2px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+QToolButton#commandMenuBtn:hover {
+    background-color: transparent;
+    color: #1F1D1A;
+}
+
+QToolButton#commandMenuBtn:pressed {
+    background-color: transparent;
+    color: #2F6B45;
+}
+
+/* 文字里已自带 ▾，去掉 Qt 默认的下拉箭头 */
+QToolButton#commandMenuBtn::menu-indicator {
+    image: none;
+    width: 0px;
+    height: 0px;
+}
+
 /* ==================== 分区标题（列表上方 / 日志上方） ==================== */
+QLabel#panelTitle {
+    background-color: transparent;
+    color: #3A352E;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
 QLabel#sectionLabel {
     background-color: transparent;
     color: #9C9488;
@@ -525,8 +631,47 @@ QDoubleSpinBox {
     background-color: #FFFFFF;
     border: 1px solid #E3DED5;
     border-radius: 6px;
-    padding: 4px 8px;
+    padding: 4px 24px 4px 8px;   /* 右边 24px 给上下箭头 */
     min-height: 18px;
+}
+
+/* 上下微调按钮：不设宽度会被挤成一条细缝，箭头根本看不见。
+   用 padding 作为定位基准，按钮就落在圆角边框里面，不会顶到边线外。 */
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 18px;
+    margin: 1px 2px 0 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+}
+
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: padding;
+    subcontrol-position: bottom right;
+    width: 18px;
+    margin: 0 2px 1px 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+}
+
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+    background: #F1EDE6;
+}
+
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+    image: url({ASSETS}/spin_up.svg);
+    width: 8px;
+    height: 5px;
+}
+
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+    image: url({ASSETS}/spin_down.svg);
+    width: 8px;
+    height: 5px;
 }
 
 QSpinBox:focus,
@@ -547,7 +692,35 @@ QGroupBox::title {
     subcontrol-origin: margin;
     left: 12px;
     padding: 0 4px;
-    color: #6E675D;
+    color: #1F1D1A;
+    font-weight: 600;
+}
+
+/* 可勾选的分组（Monkey 的「高级选项」）：标题让出勾选框的位置 */
+QGroupBox[checkable="true"]::title {
+    left: 28px;
+}
+
+/* 分组自带的勾选框：之前是系统默认的小方块，和页面里其它复选框完全不是一个语言 */
+QGroupBox::indicator {
+    subcontrol-origin: margin;
+    subcontrol-position: left center;
+    left: 10px;
+    width: 15px;
+    height: 15px;
+    border: 1px solid #CFC7BA;
+    border-radius: 4px;
+    background-color: #FFFFFF;
+}
+
+QGroupBox::indicator:hover {
+    border-color: #B4AC9E;
+}
+
+QGroupBox::indicator:checked {
+    background-color: #2F6B45;
+    border-color: #2F6B45;
+    image: url({ASSETS}/check.svg);
 }
 
 QToolTip {
@@ -556,6 +729,114 @@ QToolTip {
     border: none;
     padding: 6px 8px;
     border-radius: 4px;
+}
+
+/* ==================== 展示指令对话框 ==================== */
+QListWidget#displayList {
+    background-color: #FFFFFF;
+    border: 1px solid #E3DED5;
+    border-radius: 8px;
+    padding: 4px;
+    outline: none;
+}
+
+QWidget#displayRow {
+    background-color: transparent;
+}
+
+/* 行右侧的小标签：预设 / 自定义 */
+QLabel#presetTag {
+    background-color: #E4EBEF;
+    color: #3E6E8E;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+}
+
+QLabel#customTag {
+    background-color: #F8EDDA;
+    color: #B0761F;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+}
+
+/* ==================== 设置面板 ==================== */
+QTreeWidget#SettingsNav {
+    background-color: #FBFAF7;
+    border: 1px solid #E3DED5;
+    border-radius: 8px;
+    outline: none;
+    padding: 6px;
+    font-size: 12px;
+}
+
+QTreeWidget#SettingsNav::item {
+    padding: 8px 6px;
+    border-radius: 6px;
+    color: #4A443C;
+}
+
+QTreeWidget#SettingsNav::item:hover {
+    background-color: #F1EDE6;
+}
+
+QTreeWidget#SettingsNav::item:selected {
+    background-color: #EDF4EF;
+    color: #2F6B45;
+}
+
+QKeySequenceEdit {
+    background-color: #FFFFFF;
+    border: 1px solid #E3DED5;
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: #1F1D1A;
+}
+
+QKeySequenceEdit:focus {
+    border-color: #2F6B45;
+}
+
+/* ==================== 弱网：设备能力横幅 ==================== */
+QLabel#capabilityBanner {
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+}
+
+QLabel#capabilityBanner[level="probing"] {
+    background-color: #F3F0EA;
+    color: #6E675D;
+}
+
+QLabel#capabilityBanner[level="ok"] {
+    background-color: #EDF4EF;
+    color: #2F6B45;
+}
+
+QLabel#capabilityBanner[level="warn"] {
+    background-color: #FBF3E6;
+    color: #8A6420;
+}
+
+QLabel#capabilityBanner[level="error"] {
+    background-color: #FBEFEC;
+    color: #8C3A2B;
+}
+
+QLabel#hintLabel {
+    color: #9C9488;
+    font-size: 11px;
+}
+
+/* ==================== Toast 提示条 ==================== */
+QLabel#toast {
+    background-color: #1F1D1A;
+    color: #FFFFFF;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 12px;
 }
 
 /* ==================== 日志输出配色（代码里插入 HTML 时使用） ==================== */

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QTextEdit,
 from PySide6.QtCore import Signal, Slot, Qt
 from PySide6.QtGui import QIcon
 import qtawesome as qta
+from src.gui.toast import Toast
 
 
 class CrashLogDialog(QDialog):
@@ -93,7 +94,7 @@ class CrashLogDialog(QDialog):
     def copy_log(self):
         clipboard = QApplication.clipboard()
         clipboard.setText(self.text_edit.toPlainText())
-        QMessageBox.information(self, "复制成功", "崩溃日志已复制到剪贴板")
+        Toast.notify(self, "崩溃日志已复制到剪贴板")
 
     def save_log(self):
         file_path, _ = QFileDialog.getSaveFileName(self, "保存崩溃日志", "crash_log.txt", "文本文件 (*.txt)")
@@ -101,6 +102,6 @@ class CrashLogDialog(QDialog):
             try:
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(self.text_edit.toPlainText())
-                QMessageBox.information(self, "保存成功", f"日志已保存至 {file_path}")
+                Toast.notify(self, f"日志已保存至 {file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "保存失败", str(e))

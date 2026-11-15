@@ -12,6 +12,7 @@ from PySide6.QtCore import Signal, QTimer, QThread
 from PySide6.QtGui import QIcon
 import qtawesome as qta
 from src.utils.helpers import get_adb_path, resource_path
+from src.gui.toast import Toast
 
 
 class TcpdumpDeployThread(QThread):
@@ -383,7 +384,7 @@ class PacketCaptureDialog(QDialog):
         else:
             self.status_label.setText(f" 部署失败  : {message}")
             self._update_button_states(deploying=True)  # 保持禁用
-            QMessageBox.warning(self, "初始化失败", message)
+            Toast.notify(self, message)
 
     def start_capture(self):
         if self.capture_worker and self.capture_worker.isRunning():
@@ -416,7 +417,7 @@ class PacketCaptureDialog(QDialog):
         if success:
             self._update_button_states(stopped=True)  # 已停止，可打开文件
             self.status_label.setText("抓包已停止")
-            QMessageBox.information(self, "完成", f"抓包文件已保存至:\n{result}")
+            Toast.notify(self, f"抓包文件已保存至:\n{result}")
         else:
             self._update_button_states(stopped=False)  # 失败，不启用打开
             self.status_label.setText("抓包失败")

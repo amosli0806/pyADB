@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout,
                                QPushButton, QTextEdit, QApplication, QMessageBox)
 from PySide6.QtCore import Qt, Signal, Slot
 import qtawesome as qta
+from src.gui.toast import Toast
 
 
 class DeviceInfoDialog(QDialog):
@@ -146,4 +147,4 @@ class DeviceInfoDialog(QDialog):
     def copy_to_clipboard(self):
         clipboard = QApplication.clipboard()
         clipboard.setText(self.info_text.toPlainText())
-        QMessageBox.information(self, "复制成功", "设备信息已复制到剪贴板")
+        Toast.notify(self, "设备信息已复制到剪贴板")

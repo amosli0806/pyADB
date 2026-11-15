@@ -19,6 +19,7 @@ from PySide6.QtCore import Signal, Slot
 from src.utils.helpers import resource_path, get_adb_path
 # 直接导入底层解析和生成函数
 from src.utils.memory_analyzer import parse_memory_data, _generate_chart, _export_to_excel
+from src.gui.toast import Toast
 
 
 class MemoryMonitorDialog(QDialog):
@@ -343,7 +344,7 @@ class MemoryMonitorDialog(QDialog):
 
     def generate_report(self):
         if not self.local_data_file or not os.path.exists(self.local_data_file):
-            QMessageBox.warning(self, "警告", "请先拉取数据文件")
+            Toast.notify(self, "请先拉取数据文件")
             return
 
         car_model, ok = QInputDialog.getText(self, "车型信息", "请输入车型型号:", text="3BPA_monkey")

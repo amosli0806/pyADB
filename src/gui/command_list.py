@@ -18,6 +18,7 @@ import qtawesome as qta
 from src.models.command import Command
 from src.core.command_manager import CommandManager
 from src.utils.settings import Settings
+from src.gui.pulse import Pulse
 
 
 class CommandListItemWidget(QWidget):
@@ -53,6 +54,8 @@ class CommandListItemWidget(QWidget):
 
         # 创建水平布局作为该 widget 的主布局
         self.setObjectName("commandRow")
+        # QWidget 子类默认不画样式表背景，勾选态的高亮底色要靠这句才生效
+        self.setAttribute(Qt.WA_StyledBackground, True)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 5, 8, 5)
         layout.setSpacing(8)
@@ -62,6 +65,8 @@ class CommandListItemWidget(QWidget):
         self.checkbox.setChecked(checked)
         self.checkbox.toggled.connect(self._on_checkbox_toggled)
         layout.addWidget(self.checkbox)
+        # 初始勾选状态也要上色（setChecked 在 connect 之前，不会触发 toggled）
+        self._apply_checked_style(checked)
 
         layout.addStretch()  # 弹性空间，让按钮靠右
 
@@ -74,12 +79,35 @@ class CommandListItemWidget(QWidget):
             self.exec_btn.setCursor(Qt.PointingHandCursor)
             self.exec_btn.clicked.connect(self.on_click)
             layout.addWidget(self.exec_btn)
+            self._pulse = Pulse(self.exec_btn, low=0.5, duration=2000)
         else:
             self.exec_btn = None
+            self._pulse = None
 
     def _on_checkbox_toggled(self, checked: bool):
-        """复选框状态变化时发射信号"""
+        """复选框状态变化时：同步高亮样式 + 发射信号"""
+        self._apply_checked_style(checked)
         self.state_changed.emit(self.command.id, checked)
+
+    def _apply_checked_style(self, checked: bool):
+        """勾选的行加一层浅绿底，扫一眼就能分辨哪些会被执行"""
+        self.setProperty("checked", "true" if checked else "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        """
+        点行内空白处也能勾选/取消勾选，不必非要点中那个小方框。
+
+        按钮会自己消费点击，事件不会走到这里；再排除一次按钮矩形，
+        是为了避免点在按钮边缘 1~2px 时误触发勾选。
+        """
+        if event.button() == Qt.LeftButton:
+            pos = event.position().toPoint()
+            if self.exec_btn is None or not self.exec_btn.geometry().contains(pos):
+                self.checkbox.toggle()
+        super().mouseReleaseEvent(event)
 
     def on_click(self):
         """按钮点击事件的槽函数，根据当前状态执行相应操作"""
@@ -160,6 +188,12 @@ class CommandListItemWidget(QWidget):
         self.exec_btn.style().polish(self.exec_btn)
         self.exec_btn.update()
 
+        # 运行中的停止按钮做呼吸灯，让「这条命令正在跑」有一眼可见的生命感
+        if self.state == 'running':
+            self._pulse.start()
+        else:
+            self._pulse.stop()
+
     def is_checked(self):
         """返回复选框是否被选中"""
         return self.checkbox.isChecked()
@@ -182,6 +216,8 @@ class CommandListWidget(QListWidget):
         :param parent: 父窗口（通常是主窗口）
         """
         super().__init__(parent)
+        self.setObjectName("commandList")
+        self.setFrameShape(QListWidget.NoFrame)
         self.command_manager = command_manager
         self.commands = []                        # 当前显示的命令列表（Command 对象）
         self.states = {}                          # 记录每个命令的状态，key: command.id, value: state string

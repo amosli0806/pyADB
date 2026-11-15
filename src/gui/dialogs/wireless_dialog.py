@@ -19,6 +19,7 @@ import qtawesome as qta
 
 from src.core.adb_manager import AdbManager
 from src.core.wireless_manager import WirelessManager
+from src.gui.toast import Toast
 
 
 class WirelessDialog(QDialog):
@@ -214,12 +215,12 @@ class WirelessDialog(QDialog):
     def on_connect(self):
         ip = self.ip_edit.text().strip()
         if not ip:
-            QMessageBox.warning(self, "提示", "请输入IP地址")
+            Toast.notify(self, "请输入IP地址")
             return
 
         success, msg = self.wireless_manager.connect(ip, serial=self.current_device)
         if success:
-            QMessageBox.information(self, "成功", msg)
+            Toast.notify(self, msg)
             self.update_state()
         else:
             QMessageBox.critical(self, "连接失败", msg)
@@ -228,7 +229,7 @@ class WirelessDialog(QDialog):
     def on_disconnect(self):
         success, msg = self.wireless_manager.disconnect()
         if success:
-            QMessageBox.information(self, "成功", msg)
+            Toast.notify(self, msg)
             self.update_state()
         else:
             QMessageBox.critical(self, "失败", msg)

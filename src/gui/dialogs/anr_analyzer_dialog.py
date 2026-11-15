@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QIcon
 import qtawesome as qta
+from src.gui.toast import Toast
 
 
 class AnrAnalyzerDialog(QDialog):
@@ -260,7 +261,7 @@ class AnrAnalyzerDialog(QDialog):
         """分析本地 ANR 文件"""
         file_path = self.local_file_edit.toPlainText().strip()
         if not file_path:
-            QMessageBox.warning(self, "提示", "       请先选择文件      ")
+            Toast.notify(self, "       请先选择文件      ")
             return
 
         def worker():
@@ -335,13 +336,13 @@ class AnrAnalyzerDialog(QDialog):
     def save_report(self):
         text = self.result_text.toPlainText()
         if not text:
-            QMessageBox.warning(self, "提示", "没有可保存的内容")
+            Toast.notify(self, "没有可保存的内容")
             return
         file_path, _ = QFileDialog.getSaveFileName(self, "保存报告", "anr_report.txt", "文本文件 (*.txt)")
         if file_path:
             try:
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(text)
-                QMessageBox.information(self, "成功", f"报告已保存至 {file_path}")
+                Toast.notify(self, f"报告已保存至 {file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"保存失败: {e}")

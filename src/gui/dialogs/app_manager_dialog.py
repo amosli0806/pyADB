@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                                QLabel, QMessageBox, QProgressBar, QLineEdit)
 from PySide6.QtGui import QIcon
 import qtawesome as qta
+from src.gui.toast import Toast
 
 
 class AppManagerDialog(QDialog):
@@ -324,6 +325,6 @@ class AppManagerDialog(QDialog):
     @Slot(bool, str)
     def on_operation_result(self, success, message):
         if success:
-            QMessageBox.information(self, "成功", message)
+            Toast.notify(self, message)
         else:
-            QMessageBox.warning(self, "失败", message)
+            Toast.notify(self, message)
