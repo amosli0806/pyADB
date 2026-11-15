@@ -13,7 +13,7 @@ main_window.current_version、以及仓库根目录的 version.json —— 三�
 改完记得把 GitHub Release 的 tag 打成 v{APP_VERSION}。
 """
 
-APP_VERSION = "2.4.4"
+APP_VERSION = "2.4.5"
 
 # 构建时间（「关于」对话框里跟版本号一起显示）
 BUILD_DATE = "2026-11-15"

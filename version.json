@@ -1,7 +1,7 @@
 {
-  "version": "2.4.4",
-  "release_notes": "新增启动封面：启动时先亮界面，带进度与阶段文案，不再点完图标半天没反应。重做更新下载框：显示下载速度、剩余时间，并标明这次下的是增量包还是完整包。下载改走多镜像回退（gh-proxy → ghfast → ghproxy → 直连），单个镜像限速时自动换源。",
-  "download_url": "https://github.com/amosli0806/pyADB/releases/download/v2.4.4/bugcatcher-2.4.4-win64.zip",
+  "version": "2.4.5",
+  "release_notes": "关于页：反馈邮箱不再显示成蓝色链接，改为普通文字（可选中复制）。",
+  "download_url": "https://github.com/amosli0806/pyADB/releases/download/v2.4.5/bugcatcher-2.4.5-win64.zip",
   "md5": "",
   "force_update": false,
   "min_supported_version": "2.0.0"
