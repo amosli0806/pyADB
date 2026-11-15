@@ -106,10 +106,12 @@ class AboutDialog(QDialog):
         stack.setObjectName("AboutBody")
         info.addWidget(stack)
 
-        mail = QLabel(f"反馈：<a href='mailto:{CONTACT}' style='color:#3E6E8E;'>{CONTACT}</a>")
-        mail.setObjectName("AboutLink")
-        mail.setOpenExternalLinks(True)
-        mail.setTextFormat(Qt.RichText)
+        # 邮箱不做成链接：它只是「反馈渠道」的信息，不是要点开的入口
+        # （做成 mailto 会显出蓝色下划线，和下面的项目地址混成一片）
+        mail = QLabel(f"反馈：{CONTACT}")
+        mail.setObjectName("AboutBody")
+        mail.setTextFormat(Qt.PlainText)
+        mail.setTextInteractionFlags(Qt.TextSelectableByMouse)   # 能选中复制就够了
         info.addWidget(mail)
 
         repo = QLabel(f"项目：<a href='{GITHUB_URL}' style='color:#3E6E8E;'>{GITHUB_URL}</a>")
