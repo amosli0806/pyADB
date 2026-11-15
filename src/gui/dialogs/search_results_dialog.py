@@ -40,7 +40,7 @@ class SearchResultsDialog(QDialog):
 
         # 搜索关键词提示标签
         self.keyword_label = QLabel()
-        self.keyword_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        self.keyword_label.setStyleSheet("font-weight: bold; color: #1F1D1A;")
         layout.addWidget(self.keyword_label)
 
         # 单个列表控件
@@ -95,12 +95,12 @@ class SearchResultsDialog(QDialog):
         # 描述
         if cmd.description:
             desc_label = QLabel(cmd.description)
-            desc_label.setStyleSheet("color: #7f8c8d; font-size: 10pt;")
+            desc_label.setStyleSheet("color: #6E675D; font-size: 10pt;")
             layout.addWidget(desc_label)
 
         # 命令文本（自动换行）
         cmd_label = QLabel(f"命令：{cmd.command_text}")
-        cmd_label.setStyleSheet("color: #2980b9; font-family: monospace;")
+        cmd_label.setStyleSheet("color: #335B75; font-family: monospace;")
         cmd_label.setWordWrap(True)
         cmd_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         layout.addWidget(cmd_label)
@@ -110,21 +110,7 @@ class SearchResultsDialog(QDialog):
         execute_btn = QPushButton(" 执行")
         execute_btn.setIcon(qta.icon('fa6s.play', color='white'))
         execute_btn.setFixedHeight(30)
-        execute_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 80px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-        """)
+        execute_btn.setObjectName("primaryBtn")
         execute_btn.clicked.connect(lambda: self.execute_command.emit(cmd))
         btn_layout.addStretch()
         btn_layout.addWidget(execute_btn)
@@ -145,12 +131,12 @@ class SearchResultsDialog(QDialog):
         cmd_font.setFamily("Courier New")
         cmd_font.setBold(True)
         cmd_label.setFont(cmd_font)
-        cmd_label.setStyleSheet("color: #27ae60;")
+        cmd_label.setStyleSheet("color: #2F6B45;")
         cmd_label.setWordWrap(True)
         cmd_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         category_label = QLabel(f"[{cmd['category']}]")
-        category_label.setStyleSheet("color: #7f8c8d; font-size: 9pt;")
+        category_label.setStyleSheet("color: #6E675D; font-size: 9pt;")
         category_label.setAlignment(Qt.AlignRight)
         category_label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
 
@@ -160,30 +146,15 @@ class SearchResultsDialog(QDialog):
 
         # 描述（自动换行）
         desc_label = QLabel(cmd["description"])
-        desc_label.setStyleSheet("color: #34495e; font-size: 10pt;")
+        desc_label.setStyleSheet("color: #1F1D1A; font-size: 10pt;")
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
 
         # 复制按钮
         btn_layout = QHBoxLayout()
         copy_btn = QPushButton(" 复制")
-        copy_btn.setIcon(qta.icon('fa6s.copy', color='white'))
+        copy_btn.setIcon(qta.icon('fa6s.copy', color='#1F1D1A'))
         copy_btn.setFixedHeight(30)
-        copy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 80px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-        """)
         copy_btn.clicked.connect(lambda: self.copy_command.emit(cmd["command"]))
         btn_layout.addStretch()
         btn_layout.addWidget(copy_btn)

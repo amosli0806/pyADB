@@ -10,13 +10,14 @@ import threading
 import os
 import sys
 import shlex
+from collections import deque
 from datetime import datetime
 import re
 from PySide6.QtCore import QObject, Signal, QThreadPool, QRunnable
 import time
 
 from src.utils.helpers import get_timestamp, resource_path
-from src.utils.constants import MAX_CONCURRENT_TASKS
+from src.utils.constants import MAX_CONCURRENT_TASKS, MAX_OUTPUT_BUFFER_LINES
 
 
 class CommandSignals(QObject):
@@ -58,7 +59,9 @@ class AdbCommandRunnable(QRunnable):
         self._manually_stopped = False
         self._finished_emitted = False
         self._is_multi_command = len([c.strip() for c in command.command_text.split(';') if c.strip()]) > 1
-        self._output_lines = []
+        # 只保留最近若干行输出用于错误判定：logcat 等长跑命令的输出量无上限，
+        # 用有界队列避免内存随运行时间无限增长
+        self._output_lines = deque(maxlen=MAX_OUTPUT_BUFFER_LINES)
 
         if command.save_output:
             self._prepare_output_file()
@@ -73,14 +76,14 @@ class AdbCommandRunnable(QRunnable):
             self.LEVEL_RESULT: "🏁"
         }
         colors = {
-            self.LEVEL_INFO: "#000000",
-            self.LEVEL_SUCCESS: "#2e7d32",
-            self.LEVEL_WARNING: "#f57c00",
-            self.LEVEL_ERROR: "#c62828",
-            self.LEVEL_RESULT: "#1565c0"
+            self.LEVEL_INFO: "#1F1D1A",
+            self.LEVEL_SUCCESS: "#2F6B45",
+            self.LEVEL_WARNING: "#B0761F",
+            self.LEVEL_ERROR: "#A6402F",
+            self.LEVEL_RESULT: "#3E6E8E"
         }
         icon = icons.get(level, "")
-        color = colors.get(level, "#000000")
+        color = colors.get(level, "#1F1D1A")
         return f"<span style='color:{color};'>{icon} {text}</span>"
 
     def _emit_finished(self, success):
@@ -161,6 +164,49 @@ class AdbCommandRunnable(QRunnable):
             self.signals.error.emit(f"[{self.command.name}] 优雅停止异常: {e}")
             return False
 
+    def _kill_process_tree(self, proc, timeout=2):
+        """
+        结束命令对应的整棵子进程树。
+
+        Windows 下这些命令是用 shell=True 启动的，Popen 拿到的其实是 cmd.exe，
+        直接 terminate() 只会杀掉 cmd.exe，真正的 adb.exe 仍然活着并占着管道，
+        导致读取线程一直阻塞（每次关闭要白等 5 秒），退出后 adb.exe 还会变成孤儿进程。
+        因此这里按进程树整体结束。
+        """
+        if proc is None:
+            return
+        try:
+            if proc.poll() is not None:
+                return
+        except Exception:
+            return
+
+        if sys.platform == 'win32':
+            try:
+                subprocess.run(
+                    ['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                    capture_output=True, timeout=5,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+            except Exception:
+                pass
+
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=timeout)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=1)
+            except Exception:
+                pass
+
     def stop(self):
         if self._stopped:
             return
@@ -177,27 +223,14 @@ class AdbCommandRunnable(QRunnable):
                 pass
             self.output_file = None
 
-        if self.process and self.process.poll() is None:
-            try:
-                self.process.terminate()
-                if not self.process.wait(timeout=2):
-                    self.process.kill()
-                    self.process.wait(timeout=1)
-            except Exception:
-                if self.process.poll() is None:
-                    self.process.kill()
+        self._kill_process_tree(self.process)
 
         if "logcat" in self.command.name.lower():
             threading.Thread(target=self._clean_remote_process, daemon=True).start()
 
         if self.is_screenrecord and self._device_video_path and not self._video_pulled:
             self._stop_screenrecord_gracefully()
-            if self.process and self.process.poll() is None:
-                try:
-                    self.process.terminate()
-                    self.process.wait(timeout=2)
-                except:
-                    pass
+            self._kill_process_tree(self.process)
             threading.Thread(target=self._pull_video, args=(self._device_video_path, self._local_video_path),
                              daemon=True).start()
         else:
@@ -592,9 +625,7 @@ class AdbCommandRunnable(QRunnable):
                     preexec_fn = os.setsid
                     )
 
-            stdout_lines = [ ]
-            stderr_lines = [ ]
-            self._output_lines = [ ]
+            self._output_lines.clear()
 
             import threading
             is_logcat = self.is_logcat
@@ -607,7 +638,6 @@ class AdbCommandRunnable(QRunnable):
                     if line:
                         self._output_lines.append(line)
                         if is_stderr:
-                            stderr_lines.append(line)
                             # 判断是否为 am start 的无害警告
                             is_harmless_warning = (
                                     "its current task has been brought to the front" in line or
@@ -647,7 +677,6 @@ class AdbCommandRunnable(QRunnable):
                                 self.output_file.write(f"[ERROR] {line}\n")
                                 self.output_file.flush()
                         else :
-                            stdout_lines.append ( line )
                             # 对于 stdout，如果不是 logcat 且不是 monkey 命令，才输出信息
                             if not is_logcat and not self.is_monkey :
                                 # 多命令组合时不显示成功的子步骤输出，减少刷屏
@@ -724,11 +753,7 @@ class AdbCommandRunnable(QRunnable):
                     self.signals.error.emit (
                         self._format_message ( self.LEVEL_ERROR , f"[{self.command.name}] 命令执行超时（30秒），强制终止" )
                         )
-                self.process.terminate ( )
-                try :
-                    self.process.wait ( timeout = 5 )
-                except :
-                    self.process.kill ( )
+                self._kill_process_tree(self.process, timeout=5)
                 overall_success = False
             except Exception as e :
                 if not self._stopped :
@@ -737,8 +762,7 @@ class AdbCommandRunnable(QRunnable):
                         )
                 overall_success = False
             finally :
-                if self.process and self.process.poll ( ) is None :
-                    self.process.kill ( )
+                self._kill_process_tree(self.process)
 
         if self._is_multi_command and sub_results and not self._stopped and not self.is_monkey :  # Monkey 不显示汇总
             if self.command.name not in ["截图", "权限获取"]:
@@ -815,7 +839,7 @@ class AdbManager(QObject):
         signals.started.connect(self.command_started)
         signals.output.connect(self.command_output)
         signals.finished.connect(self.on_command_finished)
-        signals.error.connect(lambda msg: self.command_output.emit(f"<span style='color:#c62828;'>{msg}</span>"))
+        signals.error.connect(lambda msg: self.command_output.emit(f"<span style='color:#A6402F;'>{msg}</span>"))
         signals.stopped.connect ( self.on_command_stopped )  # 新增连接
         runnable = AdbCommandRunnable(command_obj, device_serial, output_dir, signals)
         self.running_commands[command_obj.id] = runnable
@@ -829,6 +853,33 @@ class AdbManager(QObject):
         runnable = self.running_commands.get(command_id)
         if runnable:
             runnable.stop()
+
+    def stop_all(self, timeout_ms=5000):
+        """
+        停止所有正在运行的命令，并等待线程池收尾。
+
+        退出程序时必须调用：QThreadPool 在解释器结束时会等待所有运行中的任务，
+        若 logcat 这类无限命令还在跑，进程将永远退不出去（任务管理器里残留）；
+        同时子进程 adb.exe 也会变成孤儿进程。
+
+        :param timeout_ms: 等待线程池结束的最长时间（毫秒）
+        :return: True 表示所有任务都已结束
+        """
+        # 先让每个任务自行终止（内部会 terminate/kill 对应的 adb 子进程）
+        for runnable in list(self.running_commands.values()):
+            try:
+                runnable.stop()
+            except Exception:
+                pass
+
+        # 再等待线程池真正空闲，避免退出时线程仍在操作已销毁的对象
+        try:
+            done = self.threadpool.waitForDone(timeout_ms)
+        except Exception:
+            done = False
+
+        self.running_commands.clear()
+        return done
 
     def start_scrcpy(self, device_serial):
         def run():

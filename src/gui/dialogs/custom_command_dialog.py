@@ -41,7 +41,7 @@ class CustomCommandDialog(QDialog):
         )
         hint_label.setWordWrap(True)
         hint_label.setStyleSheet(
-            "background-color: #f8d7da; color: #721c24; padding: 8px; border-radius: 4px; font-weight: bold;"
+            "background-color: #FBEFEC; color: #8C3A2B; padding: 8px; border-radius: 4px; font-weight: bold;"
         )
         layout.addWidget(hint_label)
 
@@ -117,22 +117,7 @@ class CustomCommandDialog(QDialog):
         # ---- 确定按钮：绿色，宽度100px（样式表控制） ----
         self.ok_btn = QPushButton("确定")
         self.ok_btn.setFixedHeight(32)
-        self.ok_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 200px;
-                max-width: 200px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-        """)
+        self.ok_btn.setObjectName("primaryBtn")
         self.ok_btn.clicked.connect(self.accept)
         btn_layout.addWidget(self.ok_btn)
 
@@ -141,22 +126,6 @@ class CustomCommandDialog(QDialog):
         # ---- 取消按钮：灰色，宽度100px（样式表控制） ----
         self.cancel_btn = QPushButton("取消")
         self.cancel_btn.setFixedHeight(32)
-        self.cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 200px;
-                max-width: 200px;
-            }
-            QPushButton:hover {
-                background-color: #a5b5b6;
-            }
-            QPushButton:pressed {
-                background-color: #7f8c8d;
-            }
-        """)
         self.cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_btn)
 

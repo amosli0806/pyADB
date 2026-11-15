@@ -35,22 +35,8 @@ class DeviceInfoDialog(QDialog):
 
         # 复制按钮：蓝色，带复制图标
         self.copy_btn = QPushButton(" 复制")
-        self.copy_btn.setIcon(qta.icon('fa6s.copy', color='white'))
+        self.copy_btn.setIcon(qta.icon('fa6s.copy', color='#1F1D1A'))
         self.copy_btn.setFixedHeight(32)
-        self.copy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-        """)
         self.copy_btn.clicked.connect(self.copy_to_clipboard)
         layout.addWidget(self.copy_btn)
 

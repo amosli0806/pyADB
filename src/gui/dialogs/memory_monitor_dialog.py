@@ -52,7 +52,7 @@ class MemoryMonitorDialog(QDialog):
             "⚠️ 需要 root 权限，脚本存放于 /data/local/tmp/"
         )
         info.setWordWrap(True)
-        info.setStyleSheet("color: #2c3e50; margin-bottom: 10px;")
+        info.setStyleSheet("color: #1F1D1A; margin-bottom: 10px;")
         layout.addWidget(info)
 
         self.log_text = QTextEdit()

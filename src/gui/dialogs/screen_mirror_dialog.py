@@ -147,7 +147,7 @@ class ScreenMirrorDialog(QDialog):
         record_status_layout = QHBoxLayout()
         record_status_layout.addWidget(QLabel("📹 录制状态:"))
         self.record_status_label = QLabel("未录制")
-        self.record_status_label.setStyleSheet("color: #95a5a6;")
+        self.record_status_label.setStyleSheet("color: #9C9488;")
         record_status_layout.addWidget(self.record_status_label)
         record_status_layout.addStretch()
         layout.addLayout(record_status_layout)
@@ -160,18 +160,7 @@ class ScreenMirrorDialog(QDialog):
         self.start_btn = QPushButton(" 开始投屏")
         self.start_btn.setIcon(qta.icon('fa6s.play', color='white'))
         self.start_btn.setFixedHeight(32)
-        self.start_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 180px;
-                max-width: 180px;
-            }
-            QPushButton:hover { background-color: #2ecc71; }
-            QPushButton:pressed { background-color: #1e8449; }
-        """)
+        self.start_btn.setObjectName("primaryBtn")
         self.start_btn.clicked.connect(self.toggle_mirror)
 
         btn_layout.addWidget(self.start_btn)
@@ -179,21 +168,10 @@ class ScreenMirrorDialog(QDialog):
 
         # 录制控制按钮
         self.record_btn = QPushButton(" 开始录制")
-        self.record_btn.setIcon(qta.icon('fa6s.video', color='white'))
+        self.record_btn.setObjectName("recordBtn")
+        self.record_btn.setIcon(qta.icon('fa6s.video', color='#1F1D1A'))
         self.record_btn.setFixedHeight(32)
-        self.record_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 180px;
-                max-width: 180px;
-            }
-            QPushButton:hover { background-color: #5dade2; }
-            QPushButton:pressed { background-color: #2980b9; }
-            QPushButton:disabled { background-color: #a3c9e8; color: #d0e5f5; }
-        """)
+        self.record_btn.setFixedWidth(180)
         self.record_btn.clicked.connect(self.toggle_record)
         self.record_btn.setEnabled(False)
 
@@ -203,94 +181,43 @@ class ScreenMirrorDialog(QDialog):
 
         # ---- 状态提示 ----
         self.tip_label = QLabel("💡 点击「开始投屏」启动 scrcpy")
-        self.tip_label.setStyleSheet("color: #7f8c8d; font-size: 11px;")
+        self.tip_label.setStyleSheet("color: #6E675D; font-size: 11px;")
         layout.addWidget(self.tip_label)
 
     # ---------- 辅助方法 ----------
     def _set_start_button_state(self):
         """投屏按钮始终为“开始投屏”，始终可点击"""
         self.start_btn.setText(" 开始投屏")
-        self.start_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 180px;
-                max-width: 180px;
-            }
-            QPushButton:hover { background-color: #2ecc71; }
-            QPushButton:pressed { background-color: #1e8449; }
-        """)
+        self.start_btn.setObjectName("primaryBtn")
         self.start_btn.setEnabled(True)
 
     def _set_record_button_state(self, state: str):
-        """设置录制按钮状态，同时管理图标"""
+        """
+        录制按钮三态：idle 描边 / recording 实心红 / busy 灰。
+
+        只切换 objectName 与可用性，外观交给 QSS，不再每次状态变化重写一遍色值。
+        """
         if state == 'idle':
-            # 投屏已就绪，可录制（启用带图标）
             self.record_btn.setText(" 开始录制")
-            self.record_btn.setIcon(qta.icon('fa6s.video', color='white'))
-            self.record_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #3498db;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    min-width: 180px;
-                    max-width: 180px;
-                }
-                QPushButton:hover { background-color: #5dade2; }
-                QPushButton:pressed { background-color: #2980b9; }
-                QPushButton:disabled { background-color: #a3c9e8; color: #d0e5f5; }
-            """)
+            self.record_btn.setIcon(qta.icon('fa6s.video', color='#1F1D1A'))
+            self.record_btn.setObjectName("recordBtn")
             self.record_btn.setEnabled(True)
         elif state == 'recording':
-            # 录制中（启用带图标）
             self.record_btn.setText(" 停止录制")
-            self.record_btn.setIcon(qta.icon('fa6s.stop', color='white'))
-            self.record_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #e74c3c;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    min-width: 180px;
-                    max-width: 180px;
-                }
-                QPushButton:hover { background-color: #f05a4a; }
-                QPushButton:pressed { background-color: #c0392b; }
-                QPushButton:disabled { background-color: #e8b4b0; color: #f5d6d4; }
-            """)
+            self.record_btn.setIcon(qta.icon('fa6s.stop', color='#FFFFFF'))
+            self.record_btn.setObjectName("stopBtn")
             self.record_btn.setEnabled(True)
-        elif state == 'starting' or state == 'stopping':
-            # 录制启/停过渡中（禁用，纯文本，无图标）
+        else:
+            # starting / stopping / disabled：过渡态与未就绪态统一为灰色禁用
             self.record_btn.setText("开始录制")
-            self.record_btn.setIcon(QIcon())  # 清除图标
-            self.record_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #a3c9e8;
-                    color: #d0e5f5;
-                    border: none;
-                    border-radius: 6px;
-                    min-width: 180px;
-                    max-width: 180px;
-                }
-            """)
+            self.record_btn.setIcon(QIcon())
+            self.record_btn.setObjectName("recordBtn")
             self.record_btn.setEnabled(False)
-        else:  # disabled（投屏未就绪，禁用，纯文本，无图标）
-            self.record_btn.setText("开始录制")
-            self.record_btn.setIcon(QIcon())  # 清除图标
-            self.record_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #a3c9e8;
-                    color: #d0e5f5;
-                    border: none;
-                    border-radius: 6px;
-                    min-width: 180px;
-                    max-width: 180px;
-                }
-            """)
-            self.record_btn.setEnabled(False)
+
+        # objectName 变了要重新走一遍样式
+        self.record_btn.style().unpolish(self.record_btn)
+        self.record_btn.style().polish(self.record_btn)
+        self.record_btn.update()
 
     def _update_ui_state(self):
         """更新所有 UI 控件的状态"""
@@ -314,20 +241,20 @@ class ScreenMirrorDialog(QDialog):
         # 录制状态标签
         if self.is_record_starting:
             self.record_status_label.setText("启动录制中…")
-            self.record_status_label.setStyleSheet("color: #f39c12;")
+            self.record_status_label.setStyleSheet("color: #B0761F;")
         elif self.is_recording:
             self.record_status_label.setText("● 录制中")
-            self.record_status_label.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            self.record_status_label.setStyleSheet("color: #A6402F; font-weight: bold;")
         elif self.is_record_stopping:
             self.record_status_label.setText("停止录制中…")
-            self.record_status_label.setStyleSheet("color: #f39c12;")
+            self.record_status_label.setStyleSheet("color: #B0761F;")
         else:
             if self.record_completed:
                 self.record_status_label.setText("录制完成")
-                self.record_status_label.setStyleSheet("color: #27ae60;")
+                self.record_status_label.setStyleSheet("color: #2F6B45;")
             else:
                 self.record_status_label.setText("未录制")
-                self.record_status_label.setStyleSheet("color: #95a5a6;")
+                self.record_status_label.setStyleSheet("color: #9C9488;")
 
         # 投屏参数禁用
         param_enabled = not (self.is_mirroring or self.is_starting)
@@ -637,6 +564,44 @@ class ScreenMirrorDialog(QDialog):
                 self.update()
 
     # ---------- 关闭事件 ----------
+    def _terminate_scrcpy(self):
+        """终止 scrcpy 子进程并停掉状态定时器，避免关闭对话框后残留进程"""
+        if self.check_timer.isActive():
+            self.check_timer.stop()
+
+        proc = getattr(self, 'scrcpy_process', None)
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+        self.scrcpy_process = None
+        self.scrcpy_pid = None
+        self.is_mirroring = False
+        self.is_starting = False
+
+    def _wait_record_finished(self, timeout=3.0):
+        """等待录制停止与文件拉取完成（异步线程），避免关闭时丢文件或残留线程"""
+        deadline = time.time() + timeout
+        while (self.is_recording or self.is_record_stopping) and time.time() < deadline:
+            time.sleep(0.1)
+
+    def force_close(self):
+        """退出程序时调用：不弹任何确认框，直接停下所有后台活动并关闭"""
+        try:
+            if self.is_recording and not self.is_record_stopping:
+                self.stop_record()
+        except Exception:
+            pass
+        self._wait_record_finished()
+        self._terminate_scrcpy()
+        self.close()
+
     def closeEvent(self, event):
         if self.is_recording or self.is_record_starting or self.is_record_stopping:
             reply = QMessageBox.question(
@@ -647,10 +612,11 @@ class ScreenMirrorDialog(QDialog):
             if reply == QMessageBox.Yes:
                 if self.is_recording:
                     self.stop_record()
-                import time
-                time.sleep(0.5)
+                self._wait_record_finished()
+                self._terminate_scrcpy()
                 event.accept()
             else:
                 event.ignore()
         else:
+            self._terminate_scrcpy()
             event.accept()

@@ -39,48 +39,13 @@ class CrashLogDialog(QDialog):
         # ---- 复制按钮：蓝色 ----
         self.copy_btn = QPushButton("复制")
         self.copy_btn.setFixedHeight(32)
-        self.copy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-            QPushButton:disabled {
-                background-color: #a3c9e8;
-                color: #d0e5f5;
-            }
-        """)
         self.copy_btn.clicked.connect(self.copy_log)
         self.copy_btn.setEnabled(False)
 
         # ---- 保存到文件按钮：绿色 ----
         self.save_btn = QPushButton("保存到文件")
         self.save_btn.setFixedHeight(32)
-        self.save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-            QPushButton:disabled {
-                background-color: #a9dfbf;
-                color: #d5f5e3;
-            }
-        """)
+        self.save_btn.setObjectName("primaryBtn")
         self.save_btn.clicked.connect(self.save_log)
         self.save_btn.setEnabled(False)
 
@@ -113,7 +78,7 @@ class CrashLogDialog(QDialog):
         if has_log:
             self.copy_btn.setEnabled(True)
             self.copy_btn.setText(" 复制")
-            self.copy_btn.setIcon(qta.icon('fa6s.copy', color='white'))
+            self.copy_btn.setIcon(qta.icon('fa6s.copy', color='#1F1D1A'))
             self.save_btn.setEnabled(True)
             self.save_btn.setText(" 保存到文件")
             self.save_btn.setIcon(qta.icon('fa6s.floppy-disk', color='white'))

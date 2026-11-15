@@ -50,7 +50,7 @@ class WirelessDialog(QDialog):
             "注意事项：本项目不支持 Android 12 系统，无线联调功能在 Android 12 设备上无法使用。"
         )
         self.version_warning_label.setStyleSheet(
-            "background-color: #f8d7da; color: #721c24; padding: 8px; border-radius: 4px; font-weight: bold;"
+            "background-color: #FBEFEC; color: #8C3A2B; padding: 8px; border-radius: 4px; font-weight: bold;"
         )
         self.version_warning_label.setWordWrap(True)
         self.version_warning_label.hide()
@@ -66,28 +66,8 @@ class WirelessDialog(QDialog):
 
         # ---- 获取按钮：蓝色，带 WiFi 图标 ----
         self.get_ip_btn = QPushButton(" 获取")
-        self.get_ip_btn.setIcon(qta.icon('fa6s.wifi', color='white'))
+        self.get_ip_btn.setIcon(qta.icon('fa6s.wifi', color='#1F1D1A'))
         self.get_ip_btn.setFixedHeight(32)
-        self.get_ip_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 0 12px;
-                min-width: 50px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-            QPushButton:disabled {
-                background-color: #a3c9e8;
-                color: #d0e5f5;
-            }
-        """)
         self.get_ip_btn.clicked.connect(self.on_get_ip)
         ip_layout.addWidget(self.get_ip_btn)
 
@@ -101,54 +81,14 @@ class WirelessDialog(QDialog):
         self.connect_btn = QPushButton(" 连接")
         self.connect_btn.setIcon(qta.icon('fa6s.link', color='white'))
         self.connect_btn.setFixedHeight(32)
-        self.connect_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 0 12px;
-                min-width: 190px;
-                max-width: 190px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-            QPushButton:disabled {
-                background-color: #a9dfbf;
-                color: #d5f5e3;
-            }
-        """)
+        self.connect_btn.setObjectName("primaryBtn")
         self.connect_btn.clicked.connect(self.on_connect)
 
         # ---- 断开按钮：红色，带禁止图标 ----
         self.disconnect_btn = QPushButton(" 断开")
         self.disconnect_btn.setIcon(qta.icon('fa6s.ban', color='white'))
         self.disconnect_btn.setFixedHeight(32)
-        self.disconnect_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 0 12px;
-                min-width: 190px;
-                max-width: 190px;
-            }
-            QPushButton:hover {
-                background-color: #f05a4a;
-            }
-            QPushButton:pressed {
-                background-color: #c0392b;
-            }
-            QPushButton:disabled {
-                background-color: #e8b4b0;
-                color: #f5d6d4;
-            }
-        """)
+        self.disconnect_btn.setObjectName("stopBtn")
         self.disconnect_btn.clicked.connect(self.on_disconnect)
 
         btn_layout.addWidget(self.connect_btn)
@@ -206,7 +146,7 @@ class WirelessDialog(QDialog):
             # 启用：显示带空格的文字 + 图标
             if button == self.get_ip_btn:
                 button.setText(" 获取")
-                button.setIcon(qta.icon('fa6s.wifi', color='white'))
+                button.setIcon(qta.icon('fa6s.wifi', color='#1F1D1A'))
             elif button == self.connect_btn:
                 button.setText(" 连接")
                 button.setIcon(qta.icon('fa6s.link', color='white'))

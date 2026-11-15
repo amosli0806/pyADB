@@ -73,8 +73,8 @@ class PushWorker(QThread):
                     if line:
                         self.output_line.emit(f"[STDERR] {line}")
 
-            t_out = threading.Thread(target=read_stdout)
-            t_err = threading.Thread(target=read_stderr)
+            t_out = threading.Thread(target=read_stdout, daemon=True)
+            t_err = threading.Thread(target=read_stderr, daemon=True)
             t_out.start()
             t_err.start()
 
@@ -152,11 +152,11 @@ class PushProgressDialog(QDialog):
 
     def on_output_line(self, line):
         if "1 file pushed" in line or "files pushed" in line:
-            formatted = f"<span style='color:#2e7d32;'>✅ [推送] {line}</span>"
+            formatted = f"<span style='color:#2F6B45;'>✅ [推送] {line}</span>"
         elif "error" in line.lower() or "failed" in line.lower():
-            formatted = f"<span style='color:#c62828;'>❌ [推送] {line}</span>"
+            formatted = f"<span style='color:#A6402F;'>❌ [推送] {line}</span>"
         else:
-            formatted = f"<span style='color:#000000;'>ℹ️ [推送] {line}</span>"
+            formatted = f"<span style='color:#1F1D1A;'>ℹ️ [推送] {line}</span>"
         if hasattr(self.parent(), 'append_log'):
             self.parent().append_log(formatted)
 

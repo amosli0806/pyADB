@@ -70,21 +70,7 @@ class ShortcutSettingsDialog(QDialog):
         self.save_btn = QPushButton(" 保存")
         self.save_btn.setIcon(qta.icon('fa6s.floppy-disk', color='white'))
         self.save_btn.setFixedHeight(32)
-        self.save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 200px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-        """)
+        self.save_btn.setObjectName("primaryBtn")
         self.save_btn.clicked.connect(self.save)
         btn_layout.addWidget(self.save_btn)
 
@@ -92,23 +78,9 @@ class ShortcutSettingsDialog(QDialog):
 
         # ---- 恢复默认按钮：橙色，带撤销图标 ----
         self.reset_btn = QPushButton(" 恢复默认")
-        self.reset_btn.setIcon(qta.icon('fa6s.arrow-rotate-left', color='white'))
+        self.reset_btn.setIcon(qta.icon('fa6s.arrow-rotate-left', color='#B0761F'))
         self.reset_btn.setFixedHeight(32)
-        self.reset_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f39c12;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 200px;
-            }
-            QPushButton:hover {
-                background-color: #f5b041;
-            }
-            QPushButton:pressed {
-                background-color: #d68910;
-            }
-        """)
+        self.reset_btn.setObjectName("warnBtn")
         self.reset_btn.clicked.connect(self.reset_defaults)
         btn_layout.addWidget(self.reset_btn)
 

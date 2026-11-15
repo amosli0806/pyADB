@@ -185,7 +185,7 @@ class PacketCaptureDialog(QDialog):
         )
         info.setWordWrap(True)
         info.setStyleSheet(
-            "background-color: #f8d7da; color: #721c24; padding: 8px; border-radius: 4px; font-weight: bold;"
+            "background-color: #FBEFEC; color: #8C3A2B; padding: 8px; border-radius: 4px; font-weight: bold;"
         )
         layout.addWidget(info)
 
@@ -209,24 +209,10 @@ class PacketCaptureDialog(QDialog):
 
         # ---- 过滤语法帮助按钮：蓝色，始终启用 ----
         self.help_btn = QPushButton("过滤语法")
-        self.help_btn.setIcon(qta.icon('fa6s.book', color='white'))
+        self.help_btn.setIcon(qta.icon('fa6s.book', color='#1F1D1A'))
         self.help_btn.setText(" 过滤语法")
         self.help_btn.setFixedWidth(100)
         self.help_btn.setFixedHeight(32)
-        self.help_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-        """)
         self.help_btn.clicked.connect(self.show_filter_help)
         scene_layout.addWidget(self.help_btn)
 
@@ -259,77 +245,19 @@ class PacketCaptureDialog(QDialog):
         # ---- 开始按钮：绿色 ----
         self.start_btn = QPushButton("开始")
         self.start_btn.setFixedHeight(32)
-        self.start_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 180px;
-                max-width: 180px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-            QPushButton:disabled {
-                background-color: #a9dfbf;
-                color: #d5f5e3;
-            }
-        """)
+        self.start_btn.setObjectName("primaryBtn")
         self.start_btn.clicked.connect(self.start_capture)
 
         # ---- 停止按钮：红色 ----
         self.stop_btn = QPushButton("停止")
         self.stop_btn.setFixedHeight(32)
-        self.stop_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 180px;
-                max-width: 180px;
-            }
-            QPushButton:hover {
-                background-color: #f05a4a;
-            }
-            QPushButton:pressed {
-                background-color: #c0392b;
-            }
-            QPushButton:disabled {
-                background-color: #e8b4b0;
-                color: #f5d6d4;
-            }
-        """)
+        self.stop_btn.setObjectName("stopBtn")
         self.stop_btn.clicked.connect(self.stop_capture)
         self.stop_btn.setEnabled(False)
 
         # ---- 打开文件位置按钮：蓝色 ----
         self.open_btn = QPushButton("打开文件位置")
         self.open_btn.setFixedHeight(32)
-        self.open_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 180px;
-                max-width: 180px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-            QPushButton:disabled {
-                background-color: #a3c9e8;
-                color: #d0e5f5;
-            }
-        """)
         self.open_btn.clicked.connect(self.open_file_location)
         self.open_btn.setEnabled(False)
 
@@ -387,7 +315,7 @@ class PacketCaptureDialog(QDialog):
             self.stop_btn.setIcon(QIcon())
             self.open_btn.setEnabled(True)
             self.open_btn.setText(" 打开文件位置")
-            self.open_btn.setIcon(qta.icon('fa6s.folder-open', color='white'))
+            self.open_btn.setIcon(qta.icon('fa6s.folder-open', color='#1F1D1A'))
         else:
             # 初始就绪（部署完成）：开始启用（带图标），停止禁用（纯文本），打开禁用（纯文本）
             self.start_btn.setEnabled(True)

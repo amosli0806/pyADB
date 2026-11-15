@@ -43,7 +43,7 @@
    python main.py
 
 4. 打包命令
-   pyinstaller main.spec
+   pyinstaller main.spec --noconfirm
 
 
 ## 项目结构

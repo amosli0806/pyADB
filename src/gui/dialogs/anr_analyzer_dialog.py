@@ -56,44 +56,13 @@ class AnrAnalyzerDialog(QDialog):
         # ---- 刷新列表按钮：蓝色 ----
         self.refresh_btn = QPushButton("刷新列表")
         self.refresh_btn.setFixedHeight(32)
-        self.refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-            QPushButton:disabled {
-                background-color: #a3c9e8;
-                color: #d0e5f5;
-            }
-        """)
         self.refresh_btn.clicked.connect(self.refresh_anr_list)
         device_layout.addWidget(self.refresh_btn)
 
         # ---- 拉取并分析按钮：绿色（始终可点击） ----
         self.pull_btn = QPushButton("拉取并分析")
         self.pull_btn.setFixedHeight(32)
-        self.pull_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-        """)
+        self.pull_btn.setObjectName("primaryBtn")
         self.pull_btn.setEnabled(True)  # 始终启用
         self.pull_btn.clicked.connect(self.pull_and_analyze)
         device_layout.addWidget(self.pull_btn)
@@ -109,44 +78,13 @@ class AnrAnalyzerDialog(QDialog):
         # ---- 选择 ANR 文件按钮：蓝色 ----
         self.select_file_btn = QPushButton("选择 ANR 文件或 bugreport.zip")
         self.select_file_btn.setFixedHeight(32)
-        self.select_file_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-        """)
         self.select_file_btn.clicked.connect(self.select_local_file)
         local_layout.addWidget(self.select_file_btn)
 
         # ---- 分析本地文件按钮：绿色 ----
         self.analyze_local_btn = QPushButton("分析本地文件")
         self.analyze_local_btn.setFixedHeight(32)
-        self.analyze_local_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-            QPushButton:disabled {
-                background-color: #a9dfbf;
-                color: #d5f5e3;
-            }
-        """)
+        self.analyze_local_btn.setObjectName("primaryBtn")
         self.analyze_local_btn.clicked.connect(self.analyze_local_file)
         local_layout.addWidget(self.analyze_local_btn)
 
@@ -163,24 +101,6 @@ class AnrAnalyzerDialog(QDialog):
         # ---- 保存报告按钮：蓝色 ----
         self.save_btn = QPushButton("保存报告")
         self.save_btn.setFixedHeight(32)
-        self.save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-            QPushButton:disabled {
-                background-color: #a3c9e8;
-                color: #d0e5f5;
-            }
-        """)
         self.save_btn.setEnabled(False)
         self.save_btn.clicked.connect(self.save_report)
         btn_layout.addWidget(self.save_btn)
@@ -204,15 +124,15 @@ class AnrAnalyzerDialog(QDialog):
             button.setText(icon_text)
             # 根据按钮类型设置对应图标
             if button == self.refresh_btn:
-                button.setIcon(qta.icon('fa6s.rotate', color='white'))
+                button.setIcon(qta.icon('fa6s.rotate', color='#1F1D1A'))
             elif button == self.pull_btn:
                 button.setIcon(qta.icon('fa6s.download', color='white'))
             elif button == self.select_file_btn:
-                button.setIcon(qta.icon('fa6s.folder-open', color='white'))
+                button.setIcon(qta.icon('fa6s.folder-open', color='#1F1D1A'))
             elif button == self.analyze_local_btn:
                 button.setIcon(qta.icon('fa6s.magnifying-glass', color='white'))
             elif button == self.save_btn:
-                button.setIcon(qta.icon('fa6s.floppy-disk', color='white'))
+                button.setIcon(qta.icon('fa6s.floppy-disk', color='#1F1D1A'))
         else:
             button.setText(plain_text)
             button.setIcon(QIcon())  # 清除图标
@@ -300,17 +220,24 @@ class AnrAnalyzerDialog(QDialog):
                     return
                 latest = files[0].strip()
                 remote_path = f"/data/anr/{latest}"
-                # 拉取到临时文件
-                local_path = tempfile.mktemp(suffix=".txt")
-                pull_cmd = ["adb", "-s", self.device_serial, "pull", remote_path, local_path]
-                if sys.platform == 'win32':
-                    subprocess.run(pull_cmd, capture_output=True, timeout=30,
-                                   creationflags=subprocess.CREATE_NO_WINDOW, check=True)
-                else:
-                    subprocess.run(pull_cmd, capture_output=True, timeout=30, check=True)
-                # 分析
-                content = self._read_file(local_path)
-                os.remove(local_path)
+                # 拉取到临时文件（mkstemp 保证文件名唯一，避免 mktemp 的竞态）
+                fd, local_path = tempfile.mkstemp(suffix=".txt")
+                os.close(fd)
+                try:
+                    pull_cmd = ["adb", "-s", self.device_serial, "pull", remote_path, local_path]
+                    if sys.platform == 'win32':
+                        subprocess.run(pull_cmd, capture_output=True, timeout=30,
+                                       creationflags=subprocess.CREATE_NO_WINDOW, check=True)
+                    else:
+                        subprocess.run(pull_cmd, capture_output=True, timeout=30, check=True)
+                    # 分析
+                    content = self._read_file(local_path)
+                finally:
+                    # 无论成功失败都清理临时文件，避免残留
+                    try:
+                        os.remove(local_path)
+                    except Exception:
+                        pass
                 parsed = self._parse_anr(content)
                 self.result_signal.emit(parsed)
             except subprocess.CalledProcessError as e:

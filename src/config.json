@@ -173,7 +173,5 @@
     "packet_capture": "Ctrl+G"
   },
   "display_filter_mode": "all",
-  "checked_commands": [
-    2
-  ]
+  "checked_commands": []
 }

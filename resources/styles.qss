@@ -1,250 +1,561 @@
-/* ==================== 全局样式 ==================== */
-/* 应用于所有 QWidget 派生类的基础样式 */
+/* ==========================================================================
+   捕虫师 · 全局样式
+   设计方向：工业实用（Industrial / utilitarian）
+   —— 暖白纸底、发丝边框、高信息密度，颜色只用来表达状态，不做装饰。
+
+   说明：Qt QSS 没有变量机制，也不支持 box-shadow / cursor / transition，
+   因此下面重复书写色值，并在每段注明用途。改主题时按块替换即可。
+
+   调色板（唯一的取色来源）
+     底色   BG        #F6F4F0     暖白纸
+     面板   SURFACE   #FFFFFF
+     次面   ALT       #FBFAF7
+     悬停   HOVER     #F1EDE6
+     发丝线 BORDER    #E3DED5
+     强线   STRONG    #CFC7BA
+     正文   TEXT      #1F1D1A     近黑（不用纯黑）
+     次要   MUTED     #6E675D
+     弱化   FAINT     #9C9488
+     执行   RUN       #2F6B45     低饱和墨绿（语义：执行 / 运行中 / 成功）
+     停止   STOP      #A6402F     砖红（语义：停止 / 删除 / 失败）
+     提醒   WARN      #B0761F     琥珀
+     信息   INFO      #3E6E8E     灰蓝
+
+   圆角：小件 4px / 控件 6px / 面板 8px
+   字阶：11px 标签 · 12px 正文 · 13px 列表项 · 15px 区块标题
+   ========================================================================== */
+
+/* ==================== 基底 ==================== */
 QWidget {
-    /* 背景颜色：浅灰色背景，适合多数控件 */
-    background-color: #f5f5f7;
-    /* 字体：优先使用"Microsoft YaHei"，后备 sans-serif 通用字体 */
-    font-family: "Microsoft YaHei", sans-serif;
-    /* 全局基础字号 12px，可被子控件继承 */
+    background-color: #F6F4F0;
+    color: #1F1D1A;
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
     font-size: 12px;
-    margin: 0px; padding: 0px;
-    /* 新增：全局文字颜色为深灰，保证可读性（按钮文字会被 QPushButton 覆盖） */
-    color: #2c3e50;
-    /* 可扩展样式示例：
-       - 设置全局圆角：border-radius: 0px;
-       - 设置全局边距：margin: 0px; padding: 0px;
-       - 设置默认文字颜色：color: #333;
-       - 设置全局动画：transition: all 0.2s ease-in-out;
-    */
+    margin: 0px;
+    padding: 0px;
 }
 
-/* ==================== 主窗口 ==================== */
-QMainWindow {
-    /* 主窗口背景白色，与工具栏背景区分 */
-    background-color: #fff;
-
-    /* 可扩展样式：
-       - 设置窗口边框：border: 1px solid #ddd;
-       - 设置窗口阴影：box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    */
+QMainWindow,
+QDialog {
+    background-color: #F6F4F0;
 }
 
 /* ==================== 工具栏 ==================== */
 QToolBar {
-    /* 背景浅灰色，与主窗口区分 */
-    background-color: #e9ecef;
-    /* 无边框（默认可能有边框） */
+    background-color: #FBFAF7;
     border: none;
-    /* 工具栏内控件间距 5px */
+    border-bottom: 1px solid #E3DED5;
     spacing: 8px;
-    /* 内边距 5px，让控件不贴边 */
-    padding: 8px;
-    border-bottom: 1px solid #ced4da;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    /* 可扩展样式：
-       - 添加底部分割线：border-bottom: 1px solid #ced4da;
-       - 设置圆角底部：border-radius: 0 0 8px 8px;
-       - 设置阴影：box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    */
+    padding: 10px 12px;
 }
 
-/* ==================== 下拉框（设备选择器等） ==================== */
+QToolBar QLabel {
+    color: #6E675D;
+    font-size: 11px;
+}
+
+QToolBar::separator {
+    background-color: #E3DED5;
+    width: 1px;
+    margin: 4px 6px;
+}
+
+/* ==================== 输入框 ==================== */
+QLineEdit {
+    background-color: #FFFFFF;
+    color: #1F1D1A;
+    border: 1px solid #E3DED5;
+    border-radius: 6px;
+    padding: 6px 10px;
+    min-height: 18px;
+    selection-background-color: #2F6B45;
+    selection-color: #FFFFFF;
+}
+
+QLineEdit:hover {
+    border-color: #CFC7BA;
+}
+
+QLineEdit:focus {
+    border-color: #2F6B45;
+}
+
+/* 输出路径：等宽字，弱化的只读态 */
+QLineEdit#outputPathEdit {
+    font-family: "Cascadia Mono", "JetBrains Mono", "Consolas", monospace;
+    font-size: 11px;
+    color: #6E675D;
+    background-color: #FFFFFF;
+    padding: 6px 10px;
+}
+
+QLineEdit#searchEdit {
+    padding: 6px 10px;
+    min-height: 18px;
+}
+
+/* ==================== 下拉框 ==================== */
 QComboBox {
-    /* 内边距：上下4px 左右10px */
-    padding: 4px 10px;
-    /* 边框：1px实线，浅灰色 */
-    border: 1px solid #ced4da;
-    /* 圆角半径 5px，使控件圆润 */
-    border-radius: 5px;
-    /* 背景白色，与工具栏对比 */
-    background-color: white;
-    /* 最小宽度160px，保证内容显示完整 */
-    min-width: 160px;
-    box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
-    /* 可扩展样式：
-       - 设置下拉箭头样式：QComboBox::drop-down { ... }
-       - 设置下拉列表样式：QComboBox QAbstractItemView { ... }
-       - 添加悬停时边框发光：box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
-       - 设置文字颜色：color: #333;
-       - 设置下拉框弹出时的阴影：box-shadow
-    */
+    background-color: #FFFFFF;
+    color: #1F1D1A;
+    border: 1px solid #E3DED5;
+    border-radius: 6px;
+    padding: 5px 10px;
+    min-height: 18px;
+    min-width: 180px;
 }
 
 QComboBox:hover {
-    border-color: #C5A3FF;
-    /* 可扩展：添加轻微过渡效果 transition: border-color 0.2s; */
+    border-color: #CFC7BA;
 }
 
-/* ==================== 路径输入框专用样式 ==================== */
-QLineEdit#outputPathEdit {
-    padding: 4px 6px;           /* 与按钮上下内边距一致 */
-    min-height: 10px;            /* 保证最小高度与按钮内容高度一致 */
-    border: 1px solid #ced4da;
-    border-radius: 5px;
-    background-color: white;
-    color: #2c3e50;
+QComboBox:focus {
+    border-color: #2F6B45;
 }
 
-/* 只读状态（路径框）样式 */
-QLineEdit#outputPathEdit:read-only {
-    background-color: #f8f9fa;
-    color: #6c757d;
-}
-
-/* ==================== 搜索框专用样式 ==================== */
-QLineEdit#searchEdit {
-    padding: 3px 3px;
-    min-height: 20px;            /* 与按钮对齐 */
-    border: 1px solid #ced4da;
-    border-radius: 5px;
-    background-color: white;
-    color: #2c3e50;
-}
-
-/* 可选：搜索框获得焦点时增加轻微阴影 */
-QLineEdit#searchEdit:focus {
-    border-color: #C5A3FF;
-    box-shadow: 0 0 0 2px rgba(197, 163, 255, 0.2);
-}
-
-/* ==================== 按钮（已修改：浅灰背景 + 黑色文字） ==================== */
-QPushButton {
-    /* 默认背景色：浅灰色 */
-    background-color: #e0e0e0;
-    /* 文字黑色，覆盖全局颜色 */
-    color: black;
-    /* 无边框（背景色作为填充） */
+QComboBox::drop-down {
     border: none;
-    /* 内边距：上下6px 左右12px，增加点击区域 */
-    padding: 6px 12px;
-    /* 圆角半径 4px */
-    border-radius: 4px;
-    cursor: pointer;
-    min-width: 50px;
-    /* 保留原有阴影，但不与悬停发光冲突 */
-    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
-    /* 可扩展样式：
-       - 设置字体加粗：font-weight: bold;
-       - 设置最小宽度：min-width: 80px;
-       - 设置过渡动画：transition: background-color 0.2s, transform 0.1s;
-       - 设置鼠标指针：cursor: pointer;
-    */
+    width: 18px;
 }
 
-/* 按钮悬停时：添加边框发光，背景色不变（保持浅灰） */
-QPushButton:hover {
-    background-color: #e0e0e0;   /* 保持浅灰背景 */
-    box-shadow: 0 0 0 2px #C5A3FF;  /* 外发光效果，颜色为淡紫色 */
-    /* 可扩展：悬停时轻微放大 transform: scale(1.02); */
-}
-
-/* 按钮按下时：背景色变为稍深的灰色，提供按压反馈 */
-QPushButton:pressed {
-    background-color: #c0c0c0;
-    /* 可扩展：按下时缩小或阴影变化 */
-}
-
-/* 按钮禁用时的样式（例如“执行中”状态） */
-QPushButton:disabled {
-    background-color: #b0b0b0;
-    color: #6c757d;
-    /* 可扩展：禁用时降低不透明度 opacity: 0.6; 或改变光标样式 cursor: not-allowed; */
-}
-
-/* ==================== 列表控件（命令列表） ==================== */
-QListWidget {
-    /* 背景白色 */
-    background-color: white;
-    /* 边框：1px实线浅灰色 */
-    border: 1px solid #3c3c3c;
-    /* 圆角 5px */
-    border-radius: 5px;
-    /* 取消默认的焦点矩形框（避免难看的高亮） */
+QComboBox QAbstractItemView {
+    background-color: #FFFFFF;
+    border: 1px solid #E3DED5;
+    border-radius: 6px;
+    padding: 4px;
     outline: none;
-
-    /* 可扩展样式：
-       - 设置交替行背景色：alternate-background-color: #f9f9f9;
-       - 设置列表项之间的间距：margin: 2px 0;
-       - 设置滚动条样式（详见下方）
-       - 设置阴影：box-shadow: inset 0 0 5px rgba(0,0,0,0.05);
-    */
+    selection-background-color: #F1EDE6;
+    selection-color: #1F1D1A;
 }
 
-/* 列表项默认样式 */
+QComboBox QAbstractItemView::item {
+    min-height: 26px;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+/* ==================== 按钮：基础（次级 / 描边） ==================== */
+QPushButton {
+    background-color: #FFFFFF;
+    color: #1F1D1A;
+    border: 1px solid #E3DED5;
+    border-radius: 6px;
+    padding: 6px 12px;
+    min-width: 44px;
+    min-height: 18px;
+}
+
+QPushButton:hover {
+    background-color: #F1EDE6;
+    border-color: #CFC7BA;
+}
+
+QPushButton:pressed {
+    background-color: #E8E2D8;
+}
+
+QPushButton:disabled {
+    background-color: #F3F0EA;
+    border-color: #E7E2D9;
+    color: #B3ACA0;
+}
+
+QPushButton:focus {
+    border-color: #2F6B45;
+}
+
+/* 主操作：实心墨绿（语义"执行/确定"，全屏只留这一处实心） */
+QPushButton#primaryBtn {
+    background-color: #2F6B45;
+    color: #FFFFFF;
+    border: 1px solid #2F6B45;
+    padding: 6px 16px;
+}
+
+QPushButton#primaryBtn:hover {
+    background-color: #387A50;
+    border-color: #387A50;
+}
+
+QPushButton#primaryBtn:pressed {
+    background-color: #27593A;
+}
+
+QPushButton#primaryBtn:disabled {
+    background-color: #D8D2C8;
+    border-color: #D8D2C8;
+    color: #FFFFFF;
+}
+
+/* 破坏性操作：描边砖红，悬停才填充 */
+QPushButton#dangerBtn {
+    background-color: #FFFFFF;
+    color: #A6402F;
+    border: 1px solid #E8CFC9;
+    padding: 6px 12px;
+}
+
+QPushButton#dangerBtn:hover {
+    background-color: #FBEFEC;
+    border-color: #A6402F;
+}
+
+QPushButton#dangerBtn:pressed {
+    background-color: #F5DFD9;
+}
+
+/* 停止类：实心砖红 —— 运行时唯一需要一眼看见的动作 */
+QPushButton#stopBtn {
+    background-color: #A6402F;
+    color: #FFFFFF;
+    border: 1px solid #A6402F;
+    padding: 6px 16px;
+}
+
+QPushButton#stopBtn:hover {
+    background-color: #B94C39;
+    border-color: #B94C39;
+}
+
+QPushButton#stopBtn:pressed {
+    background-color: #8C3427;
+}
+
+QPushButton#stopBtn:disabled {
+    background-color: #D8D2C8;
+    border-color: #D8D2C8;
+    color: #FFFFFF;
+}
+
+/* 警告类：描边琥珀（清除数据 / 恢复默认等） */
+QPushButton#warnBtn {
+    background-color: #FFFFFF;
+    color: #B0761F;
+    border: 1px solid #ECD9BC;
+    padding: 6px 12px;
+}
+
+QPushButton#warnBtn:hover {
+    background-color: #FBF3E6;
+    border-color: #B0761F;
+}
+
+QPushButton#warnBtn:pressed {
+    background-color: #F6E8D2;
+}
+
+QPushButton#warnBtn:disabled {
+    background-color: #F3F0EA;
+    border-color: #E7E2D9;
+    color: #B3ACA0;
+}
+
+/* 录制按钮：宽度由代码固定，这里只补内边距 */
+QPushButton#recordBtn {
+    padding: 6px 16px;
+}
+
+/* 纯文本按钮（搜索框内的清除 ×） */
+QPushButton#linkBtn {
+    background-color: transparent;
+    border: none;
+    color: #6E675D;
+    padding: 0px 6px;
+    min-width: 20px;
+}
+
+QPushButton#linkBtn:hover {
+    background-color: transparent;
+    color: #1F1D1A;
+}
+
+/* 纯图标按钮（刷新等）32×32 */
+QPushButton#iconBtn {
+    background-color: #FFFFFF;
+    border: 1px solid #E3DED5;
+    border-radius: 6px;
+    padding: 0px;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 30px;
+    max-height: 30px;
+}
+
+QPushButton#iconBtn:hover {
+    background-color: #F1EDE6;
+    border-color: #CFC7BA;
+}
+
+/* 快捷功能：无边框幽灵按钮，悬停才显底 */
+QPushButton#quickBtn {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #1F1D1A;
+    padding: 4px 6px;
+}
+
+QPushButton#quickBtn:hover {
+    background-color: #F1EDE6;
+    border-color: #E3DED5;
+}
+
+QPushButton#quickBtn:pressed {
+    background-color: #E8E2D8;
+}
+
+/* ==================== 列表行内的执行按钮 ==================== */
+/* idle：描边绿，安静；running：实心红（停止）；busy：禁用灰 */
+QPushButton#runBtn {
+    border-radius: 6px;
+    padding: 0px 6px;
+    min-width: 26px;
+    max-width: 26px;
+    min-height: 24px;
+    max-height: 24px;
+    font-size: 11px;
+}
+
+QPushButton#runBtn[state="idle"] {
+    background-color: #FFFFFF;
+    border: 1px solid #A9C6B4;
+    color: #2F6B45;
+}
+
+QPushButton#runBtn[state="idle"]:hover {
+    background-color: #EDF4EF;
+    border-color: #2F6B45;
+}
+
+QPushButton#runBtn[state="running"] {
+    background-color: #A6402F;
+    border: 1px solid #A6402F;
+    color: #FFFFFF;
+}
+
+QPushButton#runBtn[state="running"]:hover {
+    background-color: #B94C39;
+    border-color: #B94C39;
+}
+
+QPushButton#runBtn[state="busy"] {
+    background-color: #F3F0EA;
+    border: 1px solid #E7E2D9;
+    color: #B3ACA0;
+}
+
+/* ==================== 命令列表 ==================== */
+QListWidget {
+    background-color: #FFFFFF;
+    border: 1px solid #E3DED5;
+    border-radius: 8px;
+    outline: none;
+    padding: 4px;
+}
+
 QListWidget::item {
-    /* 内边距 2px，保持紧凑 */
-    padding: 2px;
-    /* 底部分割线，与下一项区分 */
-    border-bottom: 1px solid #3c3c3c;
-    border-radius: 5px;
-    background-color: #f1f3f5;
-    /* 可扩展样式：
-       - 设置圆角：border-radius: 4px;
-       - 设置悬停背景色：background-color: #f8f9fa;
-       - 设置选中时左侧彩色条：border-left: 4px solid #007bff;
-    */
+    border: none;
+    border-bottom: 1px solid #F0ECE4;
+    padding: 0px;
 }
 
-/* 列表项被选中时的样式（高亮） */
+QListWidget::item:hover {
+    background-color: #FBFAF7;
+}
+
 QListWidget::item:selected {
-    background-color: #f1f3f5;  /* 与默认相同 */
-    color: inherit;             /* 继承全局颜色 */
-    border-bottom: 1px solid #3c3c3c; /* 与默认相同 */
+    background-color: #F1EDE6;
+    color: #1F1D1A;
 }
 
-/* ==================== 日志输出框 ==================== */
-QTextEdit {
-    /* 白色背景，与全局浅灰区分 */
-    background-color: #ffffff;
-    /* 文字深灰色，保证可读性 */
-    color: #2b2b2b;
-    /* 等宽字体，用于日志显示 */
-    font-family: "Consolas", "Courier New", monospace;
-    /* 边框：1px实线深灰色 */
-    border: 1px solid #3c3c3c;
-    /* 圆角 5px */
-    border-radius: 5px;
-    padding: 8px;
-    box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
-    selection-background-color: #C5A3FF;
-    /* 可扩展样式：
-       - 设置内边距：padding: 8px;
-       - 设置垂直滚动条样式（见下文）
-       - 设置阴影：box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
-       - 设置光标颜色：caret-color: #ffffff;
-       - 设置选中文字背景色：selection-background-color: #007bff;
-    */
+/* 行容器透明，让列表底色透出来 */
+QWidget#commandRow {
+    background-color: transparent;
 }
+
+QWidget#commandRow QLabel {
+    background-color: transparent;
+}
+
+QCheckBox {
+    background-color: transparent;
+    spacing: 8px;
+    color: #1F1D1A;
+    font-size: 13px;
+}
+
+/* 勾选框：必须显式绘制，否则设置了样式表后 Qt 会丢掉原生 indicator */
+QCheckBox::indicator {
+    width: 15px;
+    height: 15px;
+    border: 1px solid #CFC7BA;
+    border-radius: 4px;
+    background-color: #FFFFFF;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #2F6B45;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #2F6B45;
+    border-color: #2F6B45;
+    image: url({ASSETS}/check.svg);
+}
+
+QCheckBox::indicator:disabled {
+    background-color: #F3F0EA;
+    border-color: #E7E2D9;
+}
+
+/* ==================== 日志输出 ==================== */
+QTextEdit,
+QPlainTextEdit {
+    background-color: #FFFFFF;
+    color: #1F1D1A;
+    border: 1px solid #E3DED5;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: "Cascadia Mono", "JetBrains Mono", "Consolas", monospace;
+    font-size: 12px;
+    selection-background-color: #2F6B45;
+    selection-color: #FFFFFF;
+}
+
+/* ==================== 滚动条 ==================== */
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #D5CEC2;
+    border-radius: 5px;
+    min-height: 32px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #BDB4A5;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 2px;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #D5CEC2;
+    border-radius: 5px;
+    min-width: 32px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: #BDB4A5;
+}
+
+QScrollBar::add-line,
+QScrollBar::sub-line {
+    width: 0px;
+    height: 0px;
+    background: transparent;
+}
+
+QScrollBar::add-page,
+QScrollBar::sub-page {
+    background: transparent;
+}
+
+/* ==================== 菜单 ==================== */
+QMenu {
+    background-color: #FFFFFF;
+    border: 1px solid #E3DED5;
+    border-radius: 8px;
+    padding: 6px;
+}
+
+QMenu::item {
+    padding: 7px 14px 7px 10px;
+    margin: 1px 2px;
+    border-radius: 4px;
+    color: #1F1D1A;
+    font-size: 13px;
+}
+
+QMenu::item:selected {
+    background-color: #F1EDE6;
+    color: #1F1D1A;
+}
+
+QMenu::separator {
+    height: 1px;
+    background-color: #E3DED5;
+    margin: 6px 8px;
+}
+
 /* 隐藏菜单按钮右侧的下拉箭头 */
 QPushButton#menuButton::menu-indicator {
-    image: none;           /* 不显示任何图像 */
-    width: 0px;            /* 宽度设为0，彻底隐藏占位 */
+    image: none;
+    width: 0px;
     height: 0px;
 }
-/* ==================== 自定义类样式（用于日志输出颜色） ==================== */
-/* 以下样式在代码中通过 setStyleSheet 或直接设置 class 属性使用 */
-.log-info {
-    /* 普通信息：浅灰色 */
-    color: #d4d4d4;
-}
-.log-start {
-    /* 命令开始：白色 */
-    color: #ffffff;
-}
-.log-error {
-    /* 错误信息：红色调 */
-    color: #f48771;
-}
-.log-separator {
-    /* 分隔线：灰色 */
-    color: #6c757d;
-}
-/* 这些样式可以附加到 QTextEdit 中插入的文本片段上，实现彩色输出。
-   可扩展：可以添加 .log-success { color: #4caf50; } 等更多样式。
-*/
 
-/* ==================== 左侧命令列表中的执行按钮专用样式 ==================== */
-QPushButton#commandExecuteButton {
-    height: 28px;          /* 固定高度，确保不超出 */
-    padding: 0px 4px;      /* 取消上下内边距，只保留左右 */
+/* ==================== 分区标题（列表上方 / 日志上方） ==================== */
+QLabel#sectionLabel {
+    background-color: transparent;
+    color: #9C9488;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 1px;
 }
+
+/* ==================== 分割器 ==================== */
+QSplitter::handle {
+    background-color: transparent;
+}
+
+QSplitter::handle:horizontal {
+    width: 8px;
+}
+
+/* ==================== 表单类控件（对话框内） ==================== */
+QSpinBox,
+QDoubleSpinBox {
+    background-color: #FFFFFF;
+    border: 1px solid #E3DED5;
+    border-radius: 6px;
+    padding: 4px 8px;
+    min-height: 18px;
+}
+
+QSpinBox:focus,
+QDoubleSpinBox:focus {
+    border-color: #2F6B45;
+}
+
+QGroupBox {
+    background-color: transparent;
+    border: 1px solid #E3DED5;
+    border-radius: 8px;
+    margin-top: 10px;
+    padding-top: 8px;
+    font-weight: bold;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 4px;
+    color: #6E675D;
+}
+
+QToolTip {
+    background-color: #1F1D1A;
+    color: #FBFAF7;
+    border: none;
+    padding: 6px 8px;
+    border-radius: 4px;
+}
+
+/* ==================== 日志输出配色（代码里插入 HTML 时使用） ==================== */

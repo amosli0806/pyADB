@@ -30,6 +30,7 @@ import qtawesome as qta
 
 # 新增导入更新模块
 from src.core.updater import Updater
+from src.utils.version import APP_VERSION
 
 
 class FlowLayout(QHBoxLayout):
@@ -104,7 +105,8 @@ class MainWindow(QMainWindow):
         self._mirror_dialog = None
 
         # 当前版本号（硬编码，发布时修改）
-        self.current_version = "2.0.0"
+        # 当前版本号统一取自 src/utils/version.py（发版时只改那一处）
+        self.current_version = APP_VERSION
         self.updater = None
 
     def _apply_display_filter(self):
@@ -124,6 +126,9 @@ class MainWindow(QMainWindow):
                 self.command_list.set_filter(True, True)
 
     def init_tray(self):
+        # 先置空：托盘不可用（部分 Linux 环境）时保持 None，
+        # 避免 closeEvent / 设备断开提示访问未定义属性而抛 AttributeError
+        self.tray = None
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray = QSystemTrayIcon(self)
             icon_path = os.path.join(os.path.dirname(__file__), '../../resources/icons/app_icon.ico')
@@ -135,37 +140,23 @@ class MainWindow(QMainWindow):
             self.tray.show()
 
     def _set_execute_selected_button_state(self, enabled, text):
+        """只切换可用状态与文案，外观交给 QSS（#primaryBtn 的 :disabled 规则）"""
         self.execute_selected_btn.setEnabled(enabled)
         self.execute_selected_btn.setText(text)
-        if enabled:
-            # 启用状态（“执行选中”）：绿色 + 按压深绿
-            self.execute_selected_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #27ae60;
-                    color: white;
-                }
-                QPushButton:pressed {
-                    background-color: #1e8449;
-                }
-            """)
-        else:
-            # 禁用状态（“执行中...”）：橙色，无按压态
-            self.execute_selected_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #f39c12;
-                    color: white;
-                }
-            """)
         self.execute_selected_btn.update()
 
     def setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(5, 5, 5, 5)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(10)
 
         # ---------- 工具栏 ----------
         toolbar = QToolBar()
+        toolbar.setMovable(False)      # 禁止拖动工具栏
+        toolbar.setFloatable(False)    # 禁止拖出成浮动窗口
+        toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
         self.addToolBar(toolbar)
 
         icon_path = os.path.join(os.path.dirname(__file__), '../../resources/icons')
@@ -176,22 +167,9 @@ class MainWindow(QMainWindow):
         self.device_selector.device_changed.connect(self.on_device_changed)
         toolbar.addWidget(self.device_selector)
 
-        # ---- 执行选中按钮：绿色 + 播放图标 ----
+        # ---- 执行选中：全窗口唯一的实心主按钮 ----
         self.execute_selected_btn = QPushButton(" 执行选中")
-        self.execute_selected_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-        """)
+        self.execute_selected_btn.setObjectName("primaryBtn")
         self.execute_selected_btn.clicked.connect(self.on_execute_selected)
         toolbar.addWidget(self.execute_selected_btn)
 
@@ -203,132 +181,46 @@ class MainWindow(QMainWindow):
         self.path_edit.setPlaceholderText("输出目录")
         self.path_edit.setReadOnly(True)
         self.path_edit.setFocusPolicy(Qt.ClickFocus)
-        self.path_edit.setStyleSheet("border-radius: 10px;")
         toolbar.addWidget(self.path_edit)
 
-        # ---- 浏览按钮：灰色 + 文件夹图标 ----
+        # ---- 浏览按钮：次级描边按钮 ----
         self.browse_btn = QPushButton(" 浏览")
-        self.browse_btn.setIcon(qta.icon('fa6s.folder-open', color='white'))
-        self.browse_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #a5b5b6;
-            }
-            QPushButton:pressed {
-                background-color: #7f8c8d;
-            }
-        """)
+        self.browse_btn.setIcon(qta.icon('fa6s.folder-open', color='#1F1D1A'))
         self.browse_btn.clicked.connect(self.on_browse_output_dir)
         toolbar.addWidget(self.browse_btn)
 
         toolbar.addSeparator()
 
-        # ---- 菜单按钮：灰色 + 齿轮图标 ----
+        # ---- 菜单按钮：次级描边按钮 ----
         self.menu_btn = QPushButton(" 菜单")
-        self.menu_btn.setIcon(qta.icon('fa6s.gear', color='white'))
+        self.menu_btn.setIcon(qta.icon('fa6s.gear', color='#1F1D1A'))
         self.menu_btn.setObjectName("menuButton")
-        self.menu_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: #ffffff;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #a5b5b6;
-            }
-            QPushButton:pressed {
-                background-color: #7f8c8d;
-            }
-            QPushButton::menu-indicator {
-                image: none;
-                width: 0px;
-                height: 0px;
-            }
-        """)
 
         menu = QMenu(self)
-
-        # ---- 菜单下拉面板样式（圆角 12px + 阴影） ----
-        menu.setStyleSheet(
-            """
-            QMenu {
-                background-color: #ffffff;
-                border: 1px solid #d0d0d0;
-                padding: 6px 0px;
-                margin: 2px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-                icon-size: 16px;
-            }
-            QMenu::item {
-                padding: 6px 10px 6px 0px;
-                margin: 2px 6px;
-                border-radius: 4px;
-                font-size: 13px;
-                color: #2c3e50;
-            }
-            QMenu::item:selected {
-                background-color: #e8f0fe;
-                color: #1a73e8;
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #e8e8e8;
-                margin: 4px 10px;
-            }
-        """
-        )
+        # 菜单外观由全局 QSS 的 QMenu 规则统一控制
 
         # ---------- ① 展示过滤组 ----------
         show_menu = QMenu ( "展示指令" , self )
-        show_menu.setIcon ( qta.icon ( 'fa6s.folder' , color = '#2c3e50' ) )
-        show_menu.setStyleSheet (
-            """
-            QMenu {
-                background-color: #ffffff;
-                border: 1px solid #d0d0d0;
-                padding: 6px 0px;
-                margin: 2px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-                icon-size: 16px;
-            }
-            QMenu::item {
-                padding: 6px 0px 6px 0px;
-                margin: 2px 6px;
-                border-radius: 4px;
-                font-size: 13px;
-                color: #2c3e50;
-            }
-            QMenu::item:selected {
-                background-color: #e8f0fe;
-                color: #1a73e8;
-            }
-        """
-        )
+        show_menu.setIcon ( qta.icon ( 'fa6s.folder' , color = '#1F1D1A' ) )
 
         show_all_action = QAction ( "   显示全部   " , self )
-        show_all_action.setIcon ( qta.icon ( 'fa6s.list' , color = '#2c3e50' ) )
+        show_all_action.setIcon ( qta.icon ( 'fa6s.list' , color = '#1F1D1A' ) )
         show_all_action.triggered.connect ( lambda : self.on_display_mode_changed ( 'all' ) )
         show_menu.addAction ( show_all_action )
 
         show_preset_action = QAction ( " 仅显示预设 " , self )
-        show_preset_action.setIcon ( qta.icon ( 'fa6s.thumbtack' , color = '#2c3e50' ) )
+        show_preset_action.setIcon ( qta.icon ( 'fa6s.thumbtack' , color = '#1F1D1A' ) )
         show_preset_action.triggered.connect ( lambda : self.on_display_mode_changed ( 'preset' ) )
         show_menu.addAction ( show_preset_action )
 
         show_custom_action = QAction ( "仅显示自定义" , self )
-        show_custom_action.setIcon ( qta.icon ( 'fa6s.screwdriver-wrench' , color = '#2c3e50' ) )
+        show_custom_action.setIcon ( qta.icon ( 'fa6s.screwdriver-wrench' , color = '#1F1D1A' ) )
         show_custom_action.triggered.connect ( lambda : self.on_display_mode_changed ( 'custom' ) )
         show_menu.addAction ( show_custom_action )
 
         show_menu.addSeparator ( )
         show_select_action = QAction ( " 自定义显示 " , self )
-        show_select_action.setIcon ( qta.icon ( 'fa6s.sliders' , color = '#2c3e50' ) )
+        show_select_action.setIcon ( qta.icon ( 'fa6s.sliders' , color = '#1F1D1A' ) )
         show_select_action.triggered.connect ( self.on_select_commands )
         show_menu.addAction ( show_select_action )
 
@@ -338,17 +230,17 @@ class MainWindow(QMainWindow):
 
         # ---------- ② 指令管理组 ----------
         self.add_cmd_action = QAction ( "新增指令" , self )
-        self.add_cmd_action.setIcon ( qta.icon ( 'fa6s.plus' , color = '#2c3e50' ) )
+        self.add_cmd_action.setIcon ( qta.icon ( 'fa6s.plus' , color = '#1F1D1A' ) )
         self.add_cmd_action.triggered.connect ( self.on_add_command )
         menu.addAction ( self.add_cmd_action )
 
         self.edit_cmd_action = QAction ( "编辑指令" , self )
-        self.edit_cmd_action.setIcon ( qta.icon ( 'fa6s.pen' , color = '#2c3e50' ) )
+        self.edit_cmd_action.setIcon ( qta.icon ( 'fa6s.pen' , color = '#1F1D1A' ) )
         self.edit_cmd_action.triggered.connect ( self.on_edit_command )
         menu.addAction ( self.edit_cmd_action )
 
         self.del_cmd_action = QAction ( "删除指令" , self )
-        self.del_cmd_action.setIcon ( qta.icon ( 'fa6s.trash-can' , color = '#2c3e50' ) )
+        self.del_cmd_action.setIcon ( qta.icon ( 'fa6s.trash-can' , color = '#1F1D1A' ) )
         self.del_cmd_action.triggered.connect ( self.on_delete_command )
         menu.addAction ( self.del_cmd_action )
 
@@ -356,12 +248,12 @@ class MainWindow(QMainWindow):
 
         # ---------- ③ 数据管理组 ----------
         self.export_cmd_action = QAction ( "导出指令" , self )
-        self.export_cmd_action.setIcon ( qta.icon ( 'fa6s.download' , color = '#2c3e50' ) )
+        self.export_cmd_action.setIcon ( qta.icon ( 'fa6s.download' , color = '#1F1D1A' ) )
         self.export_cmd_action.triggered.connect ( self.on_export_commands )
         menu.addAction ( self.export_cmd_action )
 
         self.import_cmd_action = QAction ( "导入指令" , self )
-        self.import_cmd_action.setIcon ( qta.icon ( 'fa6s.upload' , color = '#2c3e50' ) )
+        self.import_cmd_action.setIcon ( qta.icon ( 'fa6s.upload' , color = '#1F1D1A' ) )
         self.import_cmd_action.triggered.connect ( self.on_import_commands )
         menu.addAction ( self.import_cmd_action )
 
@@ -369,48 +261,35 @@ class MainWindow(QMainWindow):
 
         # ---------- ④ 工具 & 帮助组 ----------
         self.shortcut_action = QAction ( "快 捷 键" , self )
-        self.shortcut_action.setIcon ( qta.icon ( 'fa6s.keyboard' , color = '#2c3e50' ) )
+        self.shortcut_action.setIcon ( qta.icon ( 'fa6s.keyboard' , color = '#1F1D1A' ) )
         self.shortcut_action.triggered.connect ( self.on_shortcut_settings )
         menu.addAction ( self.shortcut_action )
 
         self.help_action = QAction ( "帮助中心" , self )
-        self.help_action.setIcon ( qta.icon ( 'fa6s.circle-question' , color = '#2c3e50' ) )
+        self.help_action.setIcon ( qta.icon ( 'fa6s.circle-question' , color = '#1F1D1A' ) )
         self.help_action.triggered.connect ( self.on_help )
         menu.addAction ( self.help_action )
 
         # ---- 新增：检查更新 ----
         self.update_action = QAction("检查更新", self)
-        self.update_action.setIcon(qta.icon('fa6s.cloud-arrow-up', color='#2c3e50'))
+        self.update_action.setIcon(qta.icon('fa6s.cloud-arrow-up', color='#1F1D1A'))
         self.update_action.triggered.connect(self.on_check_update)
         menu.addAction(self.update_action)
 
         menu.addSeparator()
 
         self.about_action = QAction ( "  关  于 " , self )
-        self.about_action.setIcon ( qta.icon ( 'fa6s.circle-info' , color = '#2c3e50' ) )
+        self.about_action.setIcon ( qta.icon ( 'fa6s.circle-info' , color = '#1F1D1A' ) )
         self.about_action.triggered.connect ( self.on_about )
         menu.addAction ( self.about_action )
 
         self.menu_btn.setMenu ( menu )
         toolbar.addWidget ( self.menu_btn )
 
-        # ---- 清空日志按钮：红色 + 垃圾桶图标 ----
+        # ---- 清空日志：破坏性操作，描边砖红 ----
         self.clear_log_btn = QPushButton(" 清空")
-        self.clear_log_btn.setIcon(qta.icon('fa6s.trash-can', color='white'))
-        self.clear_log_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #f05a4a;
-            }
-            QPushButton:pressed {
-                background-color: #c0392b;
-            }
-        """)
+        self.clear_log_btn.setIcon(qta.icon('fa6s.trash-can', color='#A6402F'))
+        self.clear_log_btn.setObjectName("dangerBtn")
         self.clear_log_btn.clicked.connect(self.on_clear_log)
         toolbar.addWidget(self.clear_log_btn)
 
@@ -424,30 +303,16 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         search_layout = QHBoxLayout()
+        search_layout.setSpacing(8)
         self.search_edit = QLineEdit()
         self.search_edit.setObjectName("searchEdit")
-        self.search_edit.setPlaceholderText("搜索预设/自定义/ADB库中的指令")
-        self.search_edit.setStyleSheet("border-radius: 10px;")
+        self.search_edit.setPlaceholderText("搜索预设 / 自定义 / ADB 库中的指令")
         self.search_edit.returnPressed.connect(self.on_search_from_box)
         search_layout.addWidget(self.search_edit)
 
-        # ---- 查找按钮：蓝色 + 放大镜图标 ----
+        # ---- 查找按钮：次级描边 ----
         self.search_btn = QPushButton(" 查找")
-        self.search_btn.setIcon(qta.icon('fa6s.magnifying-glass', color='white'))
-        self.search_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-        """)
+        self.search_btn.setIcon(qta.icon('fa6s.magnifying-glass', color='#1F1D1A'))
         self.search_btn.clicked.connect(self.on_search_from_box)
         search_layout.addWidget(self.search_btn)
 
@@ -482,35 +347,22 @@ class MainWindow(QMainWindow):
 
         # 创建容器和网格布局
         quick_widget = QWidget()
+        quick_widget.setObjectName("quickPanel")
         quick_layout = QGridLayout(quick_widget)
-        quick_layout.setContentsMargins(5, 5, 5, 5)
-        quick_layout.setHorizontalSpacing(8)
-        quick_layout.setVerticalSpacing(8)
+        quick_layout.setContentsMargins(6, 6, 6, 6)
+        quick_layout.setHorizontalSpacing(4)
+        quick_layout.setVerticalSpacing(2)
 
         cols = 7
         for idx , (text , slot , icon_name) in enumerate ( quick_buttons ) :
             row = idx // cols
             col = idx % cols
             btn = QPushButton ( f" {text}" )
-            btn.setIcon ( qta.icon ( icon_name , color = '#3d3d3d' ) )
+            btn.setObjectName("quickBtn")
+            btn.setIcon ( qta.icon ( icon_name , color = '#1F1D1A' ) )
             btn.setFixedWidth ( 100 )
             btn.setFixedHeight ( 30 )
-            btn.setStyleSheet (
-                """
-                QPushButton {
-                    border: 1px solid #d5ccc6;
-                    border-radius: 8px;
-                    background-color: #ffffff;
-                    color: #3d3d3d;
-                }
-                QPushButton:hover {
-                    background-color: #e8e0d8;
-                }
-                QPushButton:pressed {
-                    background-color: #d5c8be;
-                }
-            """
-                )
+            btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect ( slot )
             quick_layout.addWidget ( btn , row , col )
 
@@ -523,27 +375,35 @@ class MainWindow(QMainWindow):
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setStyleSheet("""
             QScrollArea {
-                border: 1px solid #d5ccc6;
-                border-radius: 10px;
-                background-color: #f2eee9;
+                border: 1px solid #E3DED5;
+                border-radius: 8px;
+                background-color: #FBFAF7;
             }
-            QScrollArea > QWidget > QWidget {
+            QScrollArea > QWidget > QWidget#quickPanel {
                 border: none;
-                border-radius: 10px;
-                background-color: #f2eee9;
+                border-radius: 8px;
+                background-color: #FBFAF7;
             }
         """)
         scroll_area.setWidget(quick_widget)
 
+        quick_label = QLabel("快 捷 工 具")
+        quick_label.setObjectName("sectionLabel")
+        right_layout.setSpacing(8)
+        right_layout.addWidget(quick_label)
         right_layout.addWidget(scroll_area)
 
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setLineWrapMode(QTextEdit.WidgetWidth)
+
+        log_label = QLabel("运 行 日 志")
+        log_label.setObjectName("sectionLabel")
+        right_layout.addWidget(log_label)
         right_layout.addWidget(self.log_output, stretch=1)
 
         splitter.addWidget(right_widget)
-        splitter.setSizes([350, 655])
+        splitter.setSizes([430, 630])
 
     def apply_shortcuts(self):
         """根据配置创建所有快捷键"""
@@ -607,24 +467,35 @@ class MainWindow(QMainWindow):
         if manual:
             self.statusBar().showMessage("正在检查更新...")
 
+    def _release_updater(self):
+        """
+        释放更新器引用。
+
+        Updater 以 self 为父对象，只把引用置 None 并不能释放它，
+        每次检查更新都会多留一个对象（及其信号连接）。
+        这里解除父子关系，交给引用计数在线程结束后回收。
+        """
+        updater = self.updater
+        self.updater = None
+        if updater is not None:
+            try:
+                updater.setParent(None)
+            except Exception:
+                pass
+
     def _on_update_check_result(self, has_update, msg, update_info):
-        if has_update:
-            # 显示更新对话框
-            notes = update_info.release_notes if update_info.release_notes else "无更新日志"
-            reply = QMessageBox.question(
-                self,
-                "发现新版本",
-                f"最新版本: {update_info.version}\n\n更新日志:\n{notes}\n\n是否立即下载并更新？",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if reply == QMessageBox.Yes:
+        if has_update and update_info is not None:
+            from src.gui.dialogs.update_dialog import UpdateDialog
+            dlg = UpdateDialog(update_info, self)
+            self._exec_dialog(dlg)
+            if dlg.action == UpdateDialog.ACTION_UPDATE:
                 self._start_download(update_info)
             else:
-                self.updater = None
+                self._release_updater()
         else:
             if msg:
                 QMessageBox.information(self, "检查更新", msg)
-            self.updater = None
+            self._release_updater()
 
     def _start_download(self, update_info):
         if self.updater is None:
@@ -632,26 +503,36 @@ class MainWindow(QMainWindow):
 
         progress = QProgressDialog("正在下载更新...", "取消", 0, 100, self)
         progress.setWindowTitle("更新下载")
-        progress.setModal(True)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
         progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.setValue(0)
 
         def on_progress(received, total):
             if total > 0:
-                progress.setValue(int(received / total * 100))
+                progress.setValue(int(received * 100 / total))
+                progress.setLabelText(
+                    f"正在下载更新... {received / 1024 / 1024:.1f} / {total / 1024 / 1024:.1f} MB"
+                )
             else:
-                progress.setValue(0)
+                progress.setLabelText(f"正在下载更新... {received / 1024 / 1024:.1f} MB")
 
         def on_download_finished(success, result):
             progress.close()
+            progress.deleteLater()     # 以 self 为父对象，不销毁会累积
             if success:
-                if self.updater is not None:
+                from src.gui.dialogs.update_dialog import UpdateReadyDialog
+                ready = UpdateReadyDialog(update_info, result, self)
+                self._exec_dialog(ready)
+                if ready.install_now and self.updater is not None:
                     self.updater.apply_update(result)
                 else:
-                    QMessageBox.critical(self, "更新失败", "更新器已失效，请重新启动程序检查更新。")
+                    self._release_updater()
             else:
                 if result != "用户取消":  # 用户取消不弹出错误
                     QMessageBox.critical(self, "下载失败", result)
-                self.updater = None
+                self._release_updater()
 
         self.updater.download_progress.connect(on_progress)
         self.updater.download_finished.connect(on_download_finished)
@@ -674,7 +555,10 @@ class MainWindow(QMainWindow):
         msg.setText(text)
         msg.setIcon(QMessageBox.Information)
         msg.setFixedWidth(500)
-        msg.exec()
+        try:
+            msg.exec()
+        finally:
+            msg.deleteLater()      # 以 self 为父对象，不销毁会一直累积
 
     def show_warning(self, title, text):
         msg = QMessageBox(self)
@@ -682,7 +566,10 @@ class MainWindow(QMainWindow):
         msg.setText(text)
         msg.setIcon(QMessageBox.Warning)
         msg.setFixedWidth(500)
-        msg.exec()
+        try:
+            msg.exec()
+        finally:
+            msg.deleteLater()
 
     def show_question(self, title, text):
         msg = QMessageBox(self)
@@ -691,15 +578,18 @@ class MainWindow(QMainWindow):
         msg.setIcon(QMessageBox.Question)
         msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         msg.setFixedWidth(500)
-        return msg.exec() == QMessageBox.Yes
+        try:
+            return msg.exec() == QMessageBox.Yes
+        finally:
+            msg.deleteLater()
 
     @Slot()
     def on_device_changed(self, serial):
         self.adb_manager.set_current_device(serial)
         if serial:
-            self.append_log(f"<span style='color:#1565c0;'>📱 {get_timestamp()} 当前设备切换为: {serial}</span>")
+            self.append_log(f"<span style='color:#3E6E8E;'>📱 {get_timestamp()} 当前设备切换为: {serial}</span>")
         else:
-            self.append_log(f"<span style='color:#c62828;'>📵 {get_timestamp()} 当前无可用设备</span>")
+            self.append_log(f"<span style='color:#A6402F;'>📵 {get_timestamp()} 当前无可用设备</span>")
 
     @Slot()
     def on_execute_selected(self):
@@ -745,7 +635,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def on_add_command(self):
         dlg = CustomCommandDialog(self)
-        if dlg.exec():
+        if self._exec_dialog(dlg):
             cmd = dlg.get_command()
             self.command_manager.add_command(cmd)
             self.command_list.refresh()
@@ -762,7 +652,7 @@ class MainWindow(QMainWindow):
             return
         cmd = selected[0]
         dlg = CustomCommandDialog(self, cmd)
-        if dlg.exec():
+        if self._exec_dialog(dlg):
             updated = dlg.get_command()
             self.command_manager.update_command(cmd.id, updated)
             self.command_list.refresh()
@@ -829,7 +719,7 @@ class MainWindow(QMainWindow):
             self.show_warning("提示", "未检测到可用设备，请连接 Android 设备并授权 USB 调试")
             return
         dlg = WirelessDialog(self.adb_manager, self.device_selector.current_device(), self)
-        dlg.exec()
+        self._exec_dialog(dlg)
 
     def _on_mirror_dialog_destroyed(self):
         """投屏对话框销毁时清理引用"""
@@ -891,23 +781,23 @@ class MainWindow(QMainWindow):
                 padding: 20px 24px;
                 background-color: #ffffff;
                 line-height: 1.7;
-                color: #2c3e50;
+                color: #1F1D1A;
             }
             h1 {
-                color: #2c3e50;
+                color: #1F1D1A;
                 font-size: 24px;
                 margin-top: 0;
                 margin-bottom: 4px;
-                border-bottom: 3px solid #3498db;
+                border-bottom: 3px solid #3E6E8E;
                 padding-bottom: 10px;
             }
             .subtitle {
-                color: #7f8c8d;
+                color: #6E675D;
                 font-size: 14px;
                 margin-bottom: 18px;
             }
             h3 {
-                color: #34495e;
+                color: #1F1D1A;
                 font-size: 15px;
                 margin-top: 16px;
                 margin-bottom: 6px;
@@ -919,23 +809,23 @@ class MainWindow(QMainWindow):
             li {
                 margin: 3px 0;
                 font-size: 13px;
-                color: #2c3e50;
+                color: #1F1D1A;
             }
             .version {
                 font-size: 18px;
-                color: #2980b9;
+                color: #335B75;
                 font-weight: bold;
             }
             .footer {
                 margin-top: 16px;
                 font-size: 12px;
-                color: #95a5a6;
+                color: #9C9488;
                 text-align: right;
-                border-top: 1px solid #ecf0f1;
+                border-top: 1px solid #F6F4F0;
                 padding-top: 10px;
             }
             a {
-                color: #2980b9;
+                color: #335B75;
                 text-decoration: none;
             }
             a:hover {
@@ -946,21 +836,21 @@ class MainWindow(QMainWindow):
                 grid-template-columns: 65px 1fr;
                 gap: 2px 12px;
                 font-size: 13px;
-                color: #2c3e50;
-                background: #f8f9fa;
+                color: #1F1D1A;
+                background: #FBFAF7;
                 padding: 10px 14px;
                 border-radius: 6px;
                 margin-bottom: 12px;
             }
             .info-grid .label {
-                color: #7f8c8d;
+                color: #6E675D;
             }
             .info-grid .value {
                 font-weight: 500;
             }
             .tag {
                 display: inline-block;
-                background: #27ae60;
+                background: #2F6B45;
                 color: #fff;
                 font-size: 11px;
                 padding: 0 10px;
@@ -968,7 +858,7 @@ class MainWindow(QMainWindow):
                 margin-left: 6px;
             }
             .tag-blue {
-                background: #3498db;
+                background: #3E6E8E;
             }
             .changelog li {
                 list-style: none;
@@ -994,20 +884,20 @@ class MainWindow(QMainWindow):
                 grid-template-columns: 110px 1fr;
                 gap: 2px 14px;
                 font-size: 12px;
-                color: #2c3e50;
+                color: #1F1D1A;
             }
             .key-grid .key {
-                color: #7f8c8d;
+                color: #6E675D;
             }
             .key-grid .desc {
-                color: #2c3e50;
+                color: #1F1D1A;
             }
             .feature-grid {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
                 gap: 2px 20px;
                 font-size: 13px;
-                color: #2c3e50;
+                color: #1F1D1A;
                 margin: 2px 0 6px 0;
             }
             .feature-grid .item {
@@ -1015,7 +905,7 @@ class MainWindow(QMainWindow):
             }
             .feature-grid .item::before {
                 content: "• ";
-                color: #3498db;
+                color: #3E6E8E;
             }
         </style>
 
@@ -1024,7 +914,7 @@ class MainWindow(QMainWindow):
 
         <div class="info-grid">
             <span class="label">版本</span>
-            <span class="value">V2.0.0 <span class="tag">Release</span></span>
+            <span class="value">{APP_VERSION_TAG} <span class="tag">Release</span></span>
             <span class="label">开发者</span>
             <span class="value">李金钊</span>
             <span class="label">反馈</span>
@@ -1087,7 +977,7 @@ class MainWindow(QMainWindow):
             <span class="key">Ctrl+G</span><span class="desc">网络抓包</span>
             <span class="key">F1</span><span class="desc">帮助中心</span>
         </div>
-        <p style="font-size: 12px; color: #95a5a6; margin-top: 4px;">💡 更多快捷键可在「菜单 → 快捷键设置」中自定义</p>
+        <p style="font-size: 12px; color: #9C9488; margin-top: 4px;">💡 更多快捷键可在「菜单 → 快捷键设置」中自定义</p>
 
         <div class="footer">
             捕虫师 —— 让 Android 调试更简单
@@ -1103,7 +993,7 @@ class MainWindow(QMainWindow):
 
         text_edit = QTextEdit ( )
         text_edit.setReadOnly ( True )
-        text_edit.setHtml ( about_html )
+        text_edit.setHtml ( about_html.replace ( "{APP_VERSION_TAG}" , f"V{APP_VERSION}" ) )
         text_edit.setStyleSheet (
             """
             QTextEdit {
@@ -1151,15 +1041,15 @@ class MainWindow(QMainWindow):
         self.command_list.set_command_state(cmd_id, 'idle')
 
         if "logcat" in cmd_name.lower() and success:
-            self.append_log(f"<span style='color:#1565c0;'>🛑 命令 {cmd_name} 已手动停止</span>")
+            self.append_log(f"<span style='color:#3E6E8E;'>🛑 命令 {cmd_name} 已手动停止</span>")
         else:
             if success:
                 icon = "✅"
-                color = "#2e7d32"
+                color = "#2F6B45"
                 status = "成功"
             else:
                 icon = "❌"
-                color = "#c62828"
+                color = "#A6402F"
                 status = "失败"
             self.append_log(f"<span style='color:{color};'>{icon} 命令 {cmd_name} 执行{status}</span>")
 
@@ -1204,12 +1094,12 @@ class MainWindow(QMainWindow):
         dialog.set_keyword(keyword)
         dialog.execute_command.connect(self.on_execute_single_command)
         dialog.copy_command.connect(self.on_copy_command)
-        dialog.exec()
+        self._exec_dialog(dialog)
 
     @Slot()
     def on_select_commands(self):
         dlg = SelectCommandsDialog(self.command_manager, self)
-        if dlg.exec():
+        if self._exec_dialog(dlg):
             selected_ids = dlg.get_selected_ids()
             Settings.save_display_command_ids(selected_ids)
             Settings.save_display_filter_mode('')
@@ -1241,60 +1131,26 @@ class MainWindow(QMainWindow):
 
         label = QLabel ( "请选择要push的内容类型" , dialog )
         label.setAlignment ( Qt.AlignCenter )
-        label.setStyleSheet ( "font-size: 16px; color: #2c3e50;" )
+        label.setStyleSheet ( "font-size: 16px; color: #1F1D1A;" )
         layout.addWidget ( label )
 
         btn_layout = QHBoxLayout ( )
         btn_layout.addStretch ( )
 
-        # ---- 文件按钮：蓝色，带文件图标 ----
+        # ---- 文件按钮：次级描边 ----
         file_btn = QPushButton ( " 文件" , dialog )
-        file_btn.setIcon ( qta.icon ( 'fa6s.file' , color = 'white' ) )
+        file_btn.setIcon ( qta.icon ( 'fa6s.file' , color = '#1F1D1A' ) )
         file_btn.setFixedHeight ( 32 )
-        file_btn.setStyleSheet (
-            """
-            QPushButton {
-                background-color: #5b8db8;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 120px;
-                max-width: 120px;
-            }
-            QPushButton:hover {
-                background-color: #6a9ec9;
-            }
-            QPushButton:pressed {
-                background-color: #4a7aa3;
-            }
-        """
-            )
+        file_btn.setStyleSheet ( "min-width: 120px; max-width: 120px;" )
         btn_layout.addWidget ( file_btn )
 
-        btn_layout.addSpacing ( 15 )
+        btn_layout.addSpacing ( 12 )
 
-        # ---- 文件夹按钮：绿色，带文件夹图标 ----
+        # ---- 文件夹按钮：次级描边 ----
         folder_btn = QPushButton ( " 文件夹" , dialog )
-        folder_btn.setIcon ( qta.icon ( 'fa6s.folder' , color = 'white' ) )
+        folder_btn.setIcon ( qta.icon ( 'fa6s.folder' , color = '#1F1D1A' ) )
         folder_btn.setFixedHeight ( 32 )
-        folder_btn.setStyleSheet (
-            """
-            QPushButton {
-                background-color: #6a994e;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 120px;
-                max-width: 120px;
-            }
-            QPushButton:hover {
-                background-color: #7aad5c;
-            }
-            QPushButton:pressed {
-                background-color: #56833e;
-            }
-        """
-            )
+        folder_btn.setStyleSheet ( "min-width: 120px; max-width: 120px;" )
         btn_layout.addWidget ( folder_btn )
 
         btn_layout.addStretch ( )
@@ -1450,7 +1306,7 @@ class MainWindow(QMainWindow):
                     self.append_log(f"<span style='color:red;'>安装失败: {filename}</span>")
                     friendly_msg = self.parse_install_error(output)
                     if friendly_msg:
-                        self.append_log(f"<span style='color:#c62828; font-weight:bold;'>⚠️ 原因：{friendly_msg}</span>")
+                        self.append_log(f"<span style='color:#A6402F; font-weight:bold;'>⚠️ 原因：{friendly_msg}</span>")
             except subprocess.TimeoutExpired:
                 process.kill()
                 self.append_log(f"<span style='color:red;'>安装超时（120秒），已终止</span>")
@@ -1469,29 +1325,29 @@ class MainWindow(QMainWindow):
                 padding: 20px 24px;
                 background-color: #ffffff;
                 line-height: 1.7;
-                color: #2c3e50;
+                color: #1F1D1A;
             }
             h1 {
-                color: #2c3e50;
+                color: #1F1D1A;
                 font-size: 22px;
                 margin-top: 0;
                 margin-bottom: 4px;
-                border-bottom: 3px solid #3498db;
+                border-bottom: 3px solid #3E6E8E;
                 padding-bottom: 10px;
             }
             .subtitle {
-                color: #7f8c8d;
+                color: #6E675D;
                 font-size: 13px;
                 margin-bottom: 16px;
             }
             h3 {
-                color: #34495e;
+                color: #1F1D1A;
                 font-size: 15px;
                 margin-top: 18px;
                 margin-bottom: 6px;
             }
             h4 {
-                color: #16a085;
+                color: #3E6E8E;
                 font-size: 13px;
                 margin-top: 12px;
                 margin-bottom: 2px;
@@ -1503,39 +1359,39 @@ class MainWindow(QMainWindow):
             li {
                 margin: 2px 0;
                 font-size: 13px;
-                color: #2c3e50;
+                color: #1F1D1A;
             }
             code {
-                background-color: #f4f4f4;
+                background-color: #FBFAF7;
                 padding: 2px 6px;
                 border-radius: 4px;
                 font-family: "Courier New", monospace;
                 font-size: 12px;
             }
             .note {
-                background-color: #fef9e7;
-                border-left: 4px solid #f39c12;
+                background-color: #FBF3E6;
+                border-left: 4px solid #B0761F;
                 padding: 8px 12px;
                 margin: 10px 0;
                 font-size: 13px;
             }
             .warning {
-                background-color: #fdedeb;
-                border-left: 4px solid #e74c3c;
+                background-color: #FBEFEC;
+                border-left: 4px solid #A6402F;
                 padding: 8px 12px;
                 margin: 10px 0;
                 font-size: 13px;
             }
             .step {
                 font-weight: bold;
-                color: #2980b9;
+                color: #335B75;
             }
             .footer {
                 margin-top: 16px;
                 font-size: 12px;
-                color: #95a5a6;
+                color: #9C9488;
                 text-align: right;
-                border-top: 1px solid #ecf0f1;
+                border-top: 1px solid #F6F4F0;
                 padding-top: 10px;
             }
         </style>
@@ -1658,7 +1514,7 @@ class MainWindow(QMainWindow):
             return
         from src.gui.dialogs.app_manager_dialog import AppManagerDialog
         dlg = AppManagerDialog(self.adb_manager, current_device, self)
-        dlg.exec()
+        self._exec_dialog(dlg)
 
     @Slot()
     def on_device_info(self):
@@ -1668,7 +1524,7 @@ class MainWindow(QMainWindow):
             return
         from src.gui.dialogs.device_info_dialog import DeviceInfoDialog
         dlg = DeviceInfoDialog(self.adb_manager, current_device, self)
-        dlg.exec()
+        self._exec_dialog(dlg)
 
     @Slot()
     def on_crash_log(self):
@@ -1678,7 +1534,7 @@ class MainWindow(QMainWindow):
             return
         from src.gui.dialogs.crash_log_dialog import CrashLogDialog
         dlg = CrashLogDialog(self.adb_manager, current_device, self)
-        dlg.exec()
+        self._exec_dialog(dlg)
 
     @Slot()
     def on_hprof_dump(self):
@@ -1688,7 +1544,7 @@ class MainWindow(QMainWindow):
             return
         from src.gui.dialogs.process_selector_dialog import ProcessSelectorDialog
         dlg = ProcessSelectorDialog(self.adb_manager, current_device, self)
-        if dlg.exec():
+        if self._exec_dialog(dlg):
             pid = dlg.get_selected_pid()
             if pid:
                 self._dump_hprof(pid)
@@ -1727,7 +1583,7 @@ class MainWindow(QMainWindow):
             return
         from src.gui.dialogs.monkey_dialog import MonkeyDialog
         dlg = MonkeyDialog(self.adb_manager, current_device, self)
-        dlg.exec()
+        self._exec_dialog(dlg)
 
     @Slot()
     def on_anr_analyzer(self):
@@ -1737,7 +1593,7 @@ class MainWindow(QMainWindow):
             return
         from src.gui.dialogs.anr_analyzer_dialog import AnrAnalyzerDialog
         dlg = AnrAnalyzerDialog(self.adb_manager, current_device, self)
-        dlg.exec()
+        self._exec_dialog(dlg)
 
     @Slot()
     def on_weak_network(self):
@@ -1747,7 +1603,7 @@ class MainWindow(QMainWindow):
             return
         from src.gui.dialogs.weak_network_dialog import WeakNetworkDialog
         dlg = WeakNetworkDialog(self.adb_manager, current_device, self)
-        dlg.exec()
+        self._exec_dialog(dlg)
 
     @Slot()
     def on_export_commands(self):
@@ -1796,7 +1652,7 @@ class MainWindow(QMainWindow):
         from src.gui.dialogs.shortcut_settings_dialog import ShortcutSettingsDialog
         dlg = ShortcutSettingsDialog(self)
         dlg.shortcuts_changed.connect(self.apply_shortcuts)
-        dlg.exec()
+        self._exec_dialog(dlg)
 
     @Slot()
     def on_packet_capture(self):
@@ -1806,7 +1662,7 @@ class MainWindow(QMainWindow):
             return
         from src.gui.dialogs.packet_capture_dialog import PacketCaptureDialog
         dlg = PacketCaptureDialog(self.adb_manager, current_device, self.path_edit.text(), self)
-        dlg.exec()
+        self._exec_dialog(dlg)
 
     @Slot()
     def on_device_list_updated(self, devices):
@@ -1822,7 +1678,69 @@ class MainWindow(QMainWindow):
                 )
         self.last_devices = new_devices
 
+    def _exec_dialog(self, dlg):
+        """
+        以模态方式运行对话框，结束后立即安排销毁。
+
+        这些对话框都以 self 为父对象，如果只在局部变量中持有，
+        Qt 的父子关系会让它们常驻到主窗口销毁为止；
+        反复打开会不断累积整棵控件树（内存只增不减）。
+        deleteLater 是延迟销毁，返回后仍可安全读取 dlg 的结果。
+        """
+        try:
+            return dlg.exec()
+        finally:
+            dlg.deleteLater()
+
+    def _shutdown_children(self):
+        """退出前的收尾：停定时器、关子窗口、停命令、等线程池"""
+        # 1. 停止设备列表轮询
+        timer = getattr(self.device_selector, 'timer', None)
+        if timer is not None:
+            try:
+                timer.stop()
+            except Exception:
+                pass
+
+        # 2. 关闭投屏对话框（内部会终止 scrcpy / 录制进程并停掉状态定时器）
+        dlg = getattr(self, '_mirror_dialog', None)
+        if dlg is not None:
+            try:
+                dlg.force_close()
+            except Exception:
+                try:
+                    dlg.close()
+                except Exception:
+                    pass
+            self._mirror_dialog = None
+
+        # 3. 中断未完成的更新下载
+        updater = getattr(self, 'updater', None)
+        if updater is not None:
+            try:
+                updater.cancel_download()
+            except Exception:
+                pass
+
+        # 4. 停止所有 ADB 命令并等待线程池收尾
+        #    QThreadPool 在解释器退出时会等待所有运行中的任务，logcat 这类
+        #    无限命令会让进程永远退不出去；子进程 adb.exe 也会变成孤儿进程
+        try:
+            self.adb_manager.stop_all(5000)
+        except Exception:
+            pass
+
     def closeEvent(self, event):
-        if self.tray:
-            self.tray.hide()
+        try:
+            self._shutdown_children()
+        except Exception:
+            pass
+
+        tray = getattr(self, 'tray', None)
+        if tray is not None:
+            try:
+                tray.hide()
+            except Exception:
+                pass
+
         event.accept()

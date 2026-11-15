@@ -50,26 +50,8 @@ class MonkeyDialog(QDialog):
         self.pkg.setText("com.baidu.naviauto")
         # ---- 选择包名按钮：蓝色，始终启用 ----
         self.select_pkg_btn = QPushButton(" 选择")
-        self.select_pkg_btn.setIcon(qta.icon('fa6s.list', color='white'))
+        self.select_pkg_btn.setIcon(qta.icon('fa6s.list', color='#1F1D1A'))
         self.select_pkg_btn.setFixedHeight(32)
-        self.select_pkg_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-            QPushButton:disabled {
-                background-color: #a3c9e8;
-                color: #d0e5f5;
-            }
-        """)
         self.select_pkg_btn.clicked.connect(self.choose_packages)
 
         pkg_layout.addWidget(self.pkg)
@@ -197,47 +179,13 @@ class MonkeyDialog(QDialog):
         # ---- 开始按钮：绿色 ----
         self.start_btn = QPushButton("开始")
         self.start_btn.setFixedHeight(32)
-        self.start_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-            QPushButton:disabled {
-                background-color: #a9dfbf;
-                color: #d5f5e3;
-            }
-        """)
+        self.start_btn.setObjectName("primaryBtn")
         self.start_btn.clicked.connect(self.start_monkey)
 
         # ---- 停止按钮：红色 ----
         self.stop_btn = QPushButton("停止")
         self.stop_btn.setFixedHeight(32)
-        self.stop_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #f05a4a;
-            }
-            QPushButton:pressed {
-                background-color: #c0392b;
-            }
-            QPushButton:disabled {
-                background-color: #e8b4b0;
-                color: #f5d6d4;
-            }
-        """)
+        self.stop_btn.setObjectName("stopBtn")
         self.stop_btn.clicked.connect(self.stop_monkey)
         self.stop_btn.setEnabled(True)
 
@@ -329,40 +277,12 @@ class MonkeyDialog(QDialog):
         search_layout = QHBoxLayout()
         search_edit = QLineEdit()
         search_edit.setPlaceholderText("🔍 搜索包名...")
-        search_edit.setStyleSheet("""
-            QLineEdit {
-                padding: 5px 8px;
-                border: 1px solid #d0d0d0;
-                border-radius: 6px;
-                background-color: white;
-            }
-            QLineEdit:focus {
-                border-color: #5b8db8;
-            }
-        """)
         search_layout.addWidget(search_edit)
 
         clear_search_btn = QPushButton("清空")
         clear_search_btn.setFixedWidth(50)
         clear_search_btn.setFixedHeight(30)
-        clear_search_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f8f9fa;
-                color: #6c757d;
-                border: 1px solid #d0d0d0;
-                border-radius: 6px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #f8f9fa;
-                color: #e74c3c;
-                border-color: #e74c3c;
-            }
-            QPushButton:pressed {
-                background-color: #dee2e6;
-                color: #c0392b;
-            }
-        """)
+        clear_search_btn.setObjectName("linkBtn")
 
         def clear_search():
             search_edit.clear()
@@ -374,16 +294,7 @@ class MonkeyDialog(QDialog):
 
         list_widget = QListWidget()
         list_widget.setSelectionMode(QListWidget.MultiSelection)
-        list_widget.setStyleSheet("""
-            QListWidget::item:selected {
-                background-color: #0078D7;
-                color: white;
-                font-weight: bold;
-            }
-            QListWidget::item:selected:focus {
-                background-color: #0078D7;
-            }
-        """)
+        # 选中态由全局 QSS 的 QListWidget::item:selected 统一控制
 
         for app in sorted(apps):
             item = QListWidgetItem(app)
@@ -411,22 +322,7 @@ class MonkeyDialog(QDialog):
 
         ok_btn = QPushButton("确定")
         ok_btn.setFixedHeight(32)
-        ok_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 450px;
-                max-width: 450px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-        """)
+        ok_btn.setObjectName("primaryBtn")
 
         btn_layout.addWidget(ok_btn)
         btn_layout.addStretch()
@@ -642,3 +538,36 @@ class MonkeyDialog(QDialog):
                 self._set_stop_button_state(False)
             except Exception as e:
                 self.status.setText(f"停止失败: {e}")
+
+    def closeEvent(self, event):
+        """关闭窗口时停掉 Monkey，避免设备侧进程与本地 adb 子进程残留"""
+        if getattr(self, 'monkey_running', False):
+            reply = QMessageBox.question(
+                self, "确认",
+                "Monkey 正在运行，关闭窗口将停止 Monkey。是否继续？",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+            try:
+                self.stop_monkey()
+            except Exception:
+                pass
+
+        self.monkey_running = False
+
+        # 终止本地 adb 客户端进程（设备侧已 kill，客户端可能仍挂着）
+        proc = getattr(self, 'process', None)
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        self.process = None
+
+        event.accept()

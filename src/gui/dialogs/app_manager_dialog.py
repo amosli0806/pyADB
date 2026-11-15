@@ -47,17 +47,6 @@ class AppManagerDialog(QDialog):
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("🔍 搜索包名...")
         self.search_edit.setFocusPolicy(Qt.ClickFocus)  # 只有点击时才获得焦点
-        self.search_edit.setStyleSheet("""
-            QLineEdit {
-                padding: 5px 8px;
-                border: 1px solid #d0d0d0;
-                border-radius: 6px;
-                background-color: white;
-            }
-            QLineEdit:focus {
-                border-color: #5b8db8;
-            }
-        """)
         self.search_edit.textChanged.connect(self.on_search_text_changed)
         search_layout.addWidget(self.search_edit)
 
@@ -65,24 +54,7 @@ class AppManagerDialog(QDialog):
         self.clear_search_btn = QPushButton("清空")
         self.clear_search_btn.setFixedWidth(50)
         self.clear_search_btn.setFixedHeight(30)
-        self.clear_search_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f8f9fa;
-                color: #6c757d;
-                border: 1px solid #d0d0d0;
-                border-radius: 6px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #f8f9fa;
-                color: #e74c3c;
-                border-color: #e74c3c;
-            }
-            QPushButton:pressed {
-                background-color: #dee2e6;
-                color: #c0392b;
-            }
-        """)
+        self.clear_search_btn.setObjectName("linkBtn")
         self.clear_search_btn.clicked.connect(self.clear_search)
         search_layout.addWidget(self.clear_search_btn)
 
@@ -90,15 +62,6 @@ class AppManagerDialog(QDialog):
 
         # 应用列表
         self.list_widget = QListWidget()
-        self.list_widget.setStyleSheet("""
-            QListWidget::item:selected {
-                background-color: #0078D7;
-                color: white;
-            }
-            QListWidget::item:selected:focus {
-                background-color: #0078D7;
-            }
-        """)
         layout.addWidget(self.list_widget)
 
         # 按钮行
@@ -107,20 +70,7 @@ class AppManagerDialog(QDialog):
         # ---- 卸载按钮：红色 ----
         self.uninstall_btn = QPushButton("卸载")
         self.uninstall_btn.setFixedHeight(32)
-        self.uninstall_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover { background-color: #f05a4a; }
-            QPushButton:pressed { background-color: #c0392b; }
-            QPushButton:disabled {
-                background-color: #e8b4b0;
-                color: #f5d6d4;
-            }
-        """)
+        self.uninstall_btn.setObjectName("stopBtn")
         self.uninstall_btn.clicked.connect(self.on_uninstall)
         self.uninstall_btn.setEnabled(False)
         btn_layout.addWidget(self.uninstall_btn)
@@ -128,20 +78,7 @@ class AppManagerDialog(QDialog):
         # ---- 清除数据按钮：橙色 ----
         self.clear_btn = QPushButton("清除数据")
         self.clear_btn.setFixedHeight(32)
-        self.clear_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f39c12;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover { background-color: #f5b041; }
-            QPushButton:pressed { background-color: #d68910; }
-            QPushButton:disabled {
-                background-color: #f5d5a5;
-                color: #f5e6d0;
-            }
-        """)
+        self.clear_btn.setObjectName("warnBtn")
         self.clear_btn.clicked.connect(self.on_clear_data)
         self.clear_btn.setEnabled(False)
         btn_layout.addWidget(self.clear_btn)
@@ -149,20 +86,6 @@ class AppManagerDialog(QDialog):
         # ---- 强制停止按钮：蓝色 ----
         self.force_stop_btn = QPushButton("强制停止")
         self.force_stop_btn.setFixedHeight(32)
-        self.force_stop_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover { background-color: #5dade2; }
-            QPushButton:pressed { background-color: #2980b9; }
-            QPushButton:disabled {
-                background-color: #a3c9e8;
-                color: #d0e5f5;
-            }
-        """)
         self.force_stop_btn.clicked.connect(self.on_force_stop)
         self.force_stop_btn.setEnabled(False)
         btn_layout.addWidget(self.force_stop_btn)
@@ -193,7 +116,7 @@ class AppManagerDialog(QDialog):
         if enabled:
             self.clear_btn.setEnabled(True)
             self.clear_btn.setText(" 清除数据")
-            self.clear_btn.setIcon(qta.icon('fa6s.eraser', color='white'))
+            self.clear_btn.setIcon(qta.icon('fa6s.eraser', color='#B0761F'))
         else:
             self.clear_btn.setEnabled(False)
             self.clear_btn.setText("清除数据")
@@ -203,7 +126,7 @@ class AppManagerDialog(QDialog):
         if enabled:
             self.force_stop_btn.setEnabled(True)
             self.force_stop_btn.setText(" 强制停止")
-            self.force_stop_btn.setIcon(qta.icon('fa6s.stop', color='white'))
+            self.force_stop_btn.setIcon(qta.icon('fa6s.stop', color='#1F1D1A'))
         else:
             self.force_stop_btn.setEnabled(False)
             self.force_stop_btn.setText("强制停止")

@@ -1,8 +1,8 @@
 {
-    "version": "2.1.0",
-    "release_notes": "新增联网更新功能；修复若干已知问题。",
-    "download_url": "https://gitee.com/amosli_1_0/py-adb/releases/download/v2.1.0/BugCatcher.exe",
-    "md5": "504a83d1872d502f0bc800c3c84a8942",
-    "force_update": false,
-    "min_supported_version": "2.0.0"
+  "version": "2.3.0",
+  "release_notes": "修复关闭后残留进程与内存泄漏；界面视觉重做；检查更新改走 GitHub Releases。",
+  "download_url": "https://github.com/amosli0806/pyADB/releases/download/v2.3.0/bugcatcher-2.3.0-win64.zip",
+  "md5": "641097e8ae591d9c94450c492b74de89",
+  "force_update": false,
+  "min_supported_version": "2.0.0"
 }

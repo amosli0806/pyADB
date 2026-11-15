@@ -1,6 +1,7 @@
 # main.py
 # 这是程序的入口文件，负责初始化 Qt 应用程序、加载样式表并显示主窗口。
 
+import os
 import sys
 # sys 模块提供了对 Python 解释器相关功能的访问，比如通过 sys.argv 获取命令行参数，
 # 以及使用 sys.exit() 退出程序。
@@ -28,14 +29,21 @@ def main():
     # "resources/styles.qss" 是相对于项目根目录的路径，resource_path 会将其转换为绝对路径。
     app.setStyle ( "Fusion" )  # 关键：先设置样式
 
+    # 把内置的 tools 目录前置到 PATH：
+    # 打包后 adb.exe / scrcpy.exe 在 _internal/tools 下，并不在系统 PATH 里，
+    # 而代码里有大量裸 "adb" 调用。不前置的话，用户机器没装 adb 就会全部失败。
+    tools_dir = resource_path("tools")
+    if os.path.isdir(tools_dir):
+        os.environ["PATH"] = tools_dir + os.pathsep + os.environ.get("PATH", "")
+
     qss_path = resource_path("resources/styles.qss")
-    # 尝试加载样式表文件。如果文件不存在或读取失败，捕获异常并打印错误信息。
+    # 样式表里用 {ASSETS} 占位图标目录：QSS 的 url() 是相对工作目录解析的，
+    # 打包后工作目录不固定，这里统一替换成绝对路径，保证勾选图标等资源能加载
+    assets_dir = resource_path("resources/icons").replace("\\", "/")
     try:
-        # 使用 Python 内置的 open 函数以只读模式打开样式表文件，指定 utf-8 编码。
         with open(qss_path, "r", encoding='utf-8') as f:
-            # 读取文件全部内容，并将其设置为应用程序的全局样式表。
-            # 样式表会影响所有由该应用创建的窗口和控件的外观。
-            app.setStyleSheet(f.read())
+            qss = f.read().replace("{ASSETS}", assets_dir)
+        app.setStyleSheet(qss)
 
     except Exception as e:
         # 如果加载失败，打印错误信息。在实际项目中可能会改用日志记录。

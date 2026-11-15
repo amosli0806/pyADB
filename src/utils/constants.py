@@ -51,8 +51,8 @@ PRESET_COMMANDS = [
         "id": 2,
         "name": "logcat日志",
         # 先清除旧日志，然后开始抓取新日志并显示时间
-        "command_text": "shell logcat -c; logcat -v time",
-        "description": "清除旧日志并开始抓取新日志",
+        "command_text": "shell logcat -c; logcat -v threadtime",
+        "description": "清除旧日志并开始抓取新日志（threadtime 格式，PID/TID 不带括号）",
         "show_stop_button": True,
         "is_preset": True,
         "save_output": True,   # 新增：是否将命令输出保存到文件（例如日志保存到本地）
@@ -159,3 +159,7 @@ DEFAULT_OUTPUT_DIR = os.path.expanduser("~/Desktop")
 # 最大并发任务数：同时执行的 ADB 命令数量上限
 # 用于限制线程池中的线程数量，避免过多进程导致系统资源耗尽
 MAX_CONCURRENT_TASKS = 10
+
+# 单条命令在内存中保留的最大输出行数（仅用于执行结束后的错误判定）
+# logcat 这类持续运行的命令输出量无上限，必须限制缓冲，否则内存会随运行时间无限增长
+MAX_OUTPUT_BUFFER_LINES = 2000

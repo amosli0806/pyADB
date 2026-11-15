@@ -1,0 +1,86 @@
+# 发版工作流：推 v* tag 自动打包并创建 GitHub Release。
+#
+# 为什么这么做：本地不需要任何 GitHub 凭据 —— 推 tag 用的是你已有的 git 推送权限，
+# 打包和创建 Release 由 runner 上的 GITHUB_TOKEN 完成（workflow 里已声明 contents: write）。
+#
+# 产出的资产名必须和客户端更新器一致：
+#   bugcatcher-<版本>-win64.zip   （内含 捕虫师/ 目录，onedir 整包）
+# src/core/updater.py 里 ASSET_PREFIX / ASSET_SUFFIX 改了就同步改这里。
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（如 v2.3.0，必须已存在）'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # 需要历史 tag 供 generate-notes 使用
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 校验 tag 与 APP_VERSION 一致
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VER=$(grep -oP 'APP_VERSION = "\K[^"]+' src/utils/version.py)
+          echo "tag=$TAG  APP_VERSION=$VER"
+          if [ "${TAG#v}" != "$VER" ]; then
+            echo "::error::tag 与 src/utils/version.py 的 APP_VERSION 不一致，请先改版本号再打 tag"
+            exit 1
+          fi
+
+      - name: 打包（onedir）
+        run: python -m PyInstaller main.spec --noconfirm --distpath dist_release --workpath build_release
+
+      - name: 生成 zip
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VER="${TAG#v}"
+          # 用 Python 而非 Compress-Archive：中文目录名会带 UTF-8 标志位，
+          # 客户端的 zipfile 才能正确解出「捕虫师/」这一层
+          python -c "
+          import shutil, sys
+          ver = sys.argv[1]
+          shutil.make_archive(f'bugcatcher-{ver}-win64', 'zip',
+                              root_dir='dist_release', base_dir='捕虫师')
+          " "$VER"
+          ls -lh *.zip
+
+      - name: 创建或更新 Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VER="${TAG#v}"
+          ASSET="bugcatcher-${VER}-win64.zip"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" --clobber
+          else
+            gh release create "$TAG" "$ASSET" \
+              --title "捕虫师 $TAG" \
+              --generate-notes
+          fi

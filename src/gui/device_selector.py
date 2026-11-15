@@ -7,7 +7,7 @@
 """
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QComboBox, QPushButton
-from PySide6.QtCore import Signal, Slot, QTimer
+from PySide6.QtCore import Signal, Slot, QTimer, Qt
 
 from src.core.adb_manager import AdbManager
 import qtawesome as qta
@@ -33,29 +33,19 @@ class DeviceSelector(QWidget):
     def setup_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
 
         self.combo = QComboBox()
-        self.combo.setMinimumWidth(210)
+        self.combo.setMinimumWidth(230)
         self.combo.currentIndexChanged.connect(self.on_combo_changed)
         layout.addWidget(self.combo)
 
-        # 刷新按钮：蓝色背景，白色文字，悬停变亮，按压变深
-        self.refresh_btn = QPushButton(" 刷新")
-        self.refresh_btn.setIcon(qta.icon('fa6s.rotate', color='white'))
-        self.refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-        """)
+        # 刷新按钮：纯图标按钮，悬停显底
+        self.refresh_btn = QPushButton()
+        self.refresh_btn.setObjectName("iconBtn")
+        self.refresh_btn.setIcon(qta.icon('fa6s.rotate', color='#1F1D1A'))
+        self.refresh_btn.setToolTip("刷新设备列表")
+        self.refresh_btn.setCursor(Qt.PointingHandCursor)
         self.refresh_btn.clicked.connect(self.refresh_devices)
         layout.addWidget(self.refresh_btn)
 

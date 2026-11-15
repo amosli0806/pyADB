@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QCheckBox, QPushButton,
     QHBoxLayout, QWidget, QApplication
 )
-from PySide6.QtCore import Signal, QTimer
+from PySide6.QtCore import Signal, QTimer, Qt
 from PySide6.QtGui import QIcon
 import qtawesome as qta
 
@@ -52,8 +52,10 @@ class CommandListItemWidget(QWidget):
         self._delay_timer.timeout.connect(self._apply_pending_state)
 
         # 创建水平布局作为该 widget 的主布局
+        self.setObjectName("commandRow")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setContentsMargins(10, 5, 8, 5)
+        layout.setSpacing(8)
 
         # 复选框，包含命令名称，点击文字即可切换勾选
         self.checkbox = QCheckBox(command.name)
@@ -63,12 +65,13 @@ class CommandListItemWidget(QWidget):
 
         layout.addStretch()  # 弹性空间，让按钮靠右
 
-        # 如果支持停止按钮，则创建按钮并连接点击事件
+        # 如果支持停止按钮，则创建图标按钮（安静态描边绿，运行态实心红）
         if show_stop_button:
-            self.exec_btn = QPushButton("执行")
-            self.exec_btn.setObjectName("commandExecuteButton")
-            self.exec_btn.setFixedWidth(60)
-            self.exec_btn.setIcon(qta.icon('fa6s.play', color='white'))
+            self.exec_btn = QPushButton()
+            self.exec_btn.setObjectName("runBtn")
+            self.exec_btn.setProperty("state", "idle")
+            self.exec_btn.setIcon(qta.icon('fa6s.play', color='#2F6B45'))
+            self.exec_btn.setCursor(Qt.PointingHandCursor)
             self.exec_btn.clicked.connect(self.on_click)
             layout.addWidget(self.exec_btn)
         else:
@@ -128,76 +131,34 @@ class CommandListItemWidget(QWidget):
             self._pending_state = None
 
     def _apply_state(self, state: str):
+        """
+        状态只改一处：按钮的 state 属性。
+
+        外观全部交给 QSS 的 QPushButton#runBtn[state="..."] 规则，
+        不再在 Python 里逐个 setStyleSheet —— 那样每加一个状态就要复制一套色值。
+        """
         self.state = state
-        if self.exec_btn:
-            if state == 'idle':
-                self.exec_btn.setText("执行")
-                self.exec_btn.setIcon(qta.icon('fa6s.play', color='white'))
-                self.exec_btn.setStyleSheet(
-                    """
-                    QPushButton {
-                        background-color: #27ae60;
-                        color: white;
-                        border: none;
-                        border-radius: 6px;
-                    }
-                    QPushButton:hover {
-                        background-color: #2ecc71;
-                    }
-                    QPushButton:pressed {
-                        background-color: #1e8449;
-                    }
-                """
-                )
-                self.exec_btn.setEnabled(True)
-            elif state == 'starting':
-                self.exec_btn.setText("启动中…")
-                self.exec_btn.setIcon(QIcon())  # 清除图标
-                self.exec_btn.setStyleSheet(
-                    """
-                    QPushButton {
-                        background-color: #f39c12;
-                        color: white;
-                        border: none;
-                        border-radius: 6px;
-                    }
-                """
-                )
-                self.exec_btn.setEnabled(False)
-            elif state == 'running':
-                self.exec_btn.setText("停止")
-                self.exec_btn.setIcon(qta.icon('fa6s.stop', color='white'))
-                self.exec_btn.setStyleSheet(
-                    """
-                    QPushButton {
-                        background-color: #e74c3c;
-                        color: white;
-                        border: none;
-                        border-radius: 6px;
-                    }
-                    QPushButton:hover {
-                        background-color: #f05a4a;
-                    }
-                    QPushButton:pressed {
-                        background-color: #c0392b;
-                    }
-                """
-                )
-                self.exec_btn.setEnabled(True)
-            elif state == 'stopping':
-                self.exec_btn.setText("停止中…")
-                self.exec_btn.setIcon(QIcon())  # 清除图标
-                self.exec_btn.setStyleSheet(
-                    """
-                    QPushButton {
-                        background-color: #f39c12;
-                        color: white;
-                        border: none;
-                        border-radius: 6px;
-                    }
-                """
-                )
-                self.exec_btn.setEnabled(False)
+        if not self.exec_btn:
+            return
+
+        if state == 'idle':
+            self.exec_btn.setProperty("state", "idle")
+            self.exec_btn.setIcon(qta.icon('fa6s.play', color='#2F6B45'))
+            self.exec_btn.setEnabled(True)
+        elif state == 'running':
+            self.exec_btn.setProperty("state", "running")
+            self.exec_btn.setIcon(qta.icon('fa6s.stop', color='#FFFFFF'))
+            self.exec_btn.setEnabled(True)
+        else:
+            # starting / stopping：中间态显示沙漏，避免按钮出现空白
+            self.exec_btn.setProperty("state", "busy")
+            self.exec_btn.setIcon(qta.icon('fa6s.hourglass-half', color='#9C9488'))
+            self.exec_btn.setEnabled(False)
+
+        # 动态属性变化后必须重新让样式生效
+        self.exec_btn.style().unpolish(self.exec_btn)
+        self.exec_btn.style().polish(self.exec_btn)
+        self.exec_btn.update()
 
     def is_checked(self):
         """返回复选框是否被选中"""
@@ -224,10 +185,20 @@ class CommandListWidget(QListWidget):
         self.command_manager = command_manager
         self.commands = []                        # 当前显示的命令列表（Command 对象）
         self.states = {}                          # 记录每个命令的状态，key: command.id, value: state string
+        # 命令名较长时宁可裁切也不要横向滚动条（滚动条会让列表看起来"没对齐"）
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollMode(QListWidget.ScrollPerPixel)
         self.refresh()
 
     def refresh(self):
         """刷新列表：从命令管理器重新获取所有命令，并重建列表项，同时恢复勾选状态"""
+        # QListWidget.clear() 不会销毁通过 setItemWidget 挂上的控件，
+        # 不显式释放的话，每次刷新都会残留一整批控件（内存只增不减）。
+        for i in range(self.count()):
+            old = self.itemWidget(self.item(i))
+            if old is not None:
+                old.setParent(None)
+                old.deleteLater()
         self.clear()
         self.commands = self.command_manager.get_all_commands()
         # 加载保存的勾选状态

@@ -25,12 +25,6 @@ class SelectCommandsDialog(QDialog):
         # 列表控件
         self.list_widget = QListWidget()
         # 增加项的内边距和间距
-        self.list_widget.setStyleSheet("""
-            QListWidget::item {
-                padding: 8px 10px;
-                border-bottom: 1px solid #e8e8e8;
-            }
-        """)
         self.list_widget.setSpacing(2)  # 项之间垂直间距
         layout.addWidget(self.list_widget)
 
@@ -41,42 +35,13 @@ class SelectCommandsDialog(QDialog):
         # ---- 全选/全不选按钮：蓝色 ----
         self.toggle_all_btn = QPushButton("全选")
         self.toggle_all_btn.setFixedHeight(32)
-        self.toggle_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 160px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-        """)
         self.toggle_all_btn.clicked.connect(self.toggle_all)
         btn_layout.addWidget(self.toggle_all_btn)
 
         # ---- 确定按钮：绿色 ----
         self.ok_btn = QPushButton("确定")
         self.ok_btn.setFixedHeight(32)
-        self.ok_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 160px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-        """)
+        self.ok_btn.setObjectName("primaryBtn")
         self.ok_btn.clicked.connect(self.accept)
         btn_layout.addWidget(self.ok_btn)
 

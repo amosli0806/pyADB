@@ -32,17 +32,6 @@ class ProcessSelectorDialog(QDialog):
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("🔍 搜索包名...")
         self.search_edit.setFocusPolicy(Qt.ClickFocus)  # 只有点击时才获得焦点
-        self.search_edit.setStyleSheet("""
-            QLineEdit {
-                padding: 5px 8px;
-                border: 1px solid #d0d0d0;
-                border-radius: 6px;
-                background-color: white;
-            }
-            QLineEdit:focus {
-                border-color: #5b8db8;
-            }
-        """)
         self.search_edit.textChanged.connect(self.on_search_text_changed)
         search_layout.addWidget(self.search_edit)
 
@@ -50,57 +39,18 @@ class ProcessSelectorDialog(QDialog):
         self.clear_search_btn = QPushButton("清空")
         self.clear_search_btn.setFixedWidth(50)
         self.clear_search_btn.setFixedHeight(30)
-        self.clear_search_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f8f9fa;
-                color: #6c757d;
-                border: 1px solid #d0d0d0;
-                border-radius: 6px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #f8f9fa;
-                color: #e74c3c;
-                border-color: #e74c3c;
-            }
-            QPushButton:pressed {
-                background-color: #dee2e6;
-                color: #c0392b;
-            }
-        """)
+        self.clear_search_btn.setObjectName("linkBtn")
         self.clear_search_btn.clicked.connect(self.clear_search)
         search_layout.addWidget(self.clear_search_btn)
 
         layout.addLayout(search_layout)
 
         self.list = QListWidget()
-        self.list.setStyleSheet("""
-            QListWidget::item:selected {
-                background-color: #0078D7;
-                color: white;
-            }
-            QListWidget::item:selected:focus {
-                background-color: #0078D7;
-            }
-        """)
         layout.addWidget(self.list)
 
         self.btn = QPushButton("确定")
         self.btn.setFixedHeight(32)
-        self.btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover { background-color: #2ecc71; }
-            QPushButton:pressed { background-color: #1e8449; }
-            QPushButton:disabled {
-                background-color: #a9dfbf;
-                color: #d5f5e3;
-            }
-        """)
+        self.btn.setObjectName("primaryBtn")
         self.btn.clicked.connect(self.accept)
         self.btn.setEnabled(False)
         layout.addWidget(self.btn)
@@ -166,7 +116,11 @@ class ProcessSelectorDialog(QDialog):
                 packages.sort()
 
                 # 更新UI（在主线程）
-                if not self.isVisible():
+                # 注意：对话框可能已被销毁（用户直接关窗），此时访问任何属性都会抛 RuntimeError
+                try:
+                    if not self.isVisible():
+                        return
+                except RuntimeError:
                     return
 
                 self.list.clear()
@@ -177,8 +131,14 @@ class ProcessSelectorDialog(QDialog):
 
                 self.label.setText(f"共 {len(packages)} 个应用")
 
+            except RuntimeError:
+                # 对话框已销毁，线程安静退出，避免控制台刷堆栈
+                return
             except Exception as e:
-                self.label.setText(f"加载失败: {e}")
+                try:
+                    self.label.setText(f"加载失败: {e}")
+                except RuntimeError:
+                    return
 
         threading.Thread(target=worker, daemon=True).start()
 

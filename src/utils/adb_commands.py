@@ -219,7 +219,7 @@ ADB_COMMANDS = [
     {
         "command": "adb logcat",
         "category": "日志",
-        "description": "查看设备日志（-c 清除，-v time 显示时间）"
+        "description": "查看设备日志（-c 清除；默认 threadtime 格式，PID/TID 不带括号）"
     },
     {
         "command": "adb logcat -b radio",
@@ -237,9 +237,9 @@ ADB_COMMANDS = [
         "description": "生成完整的错误报告（压缩包）"
     },
     {
-        "command": "adb logcat -b crash -v time",
+        "command": "adb logcat -b crash -v threadtime",
         "category": "日志",
-        "description": "捕获崩溃日志（带时间戳）"
+        "description": "捕获崩溃日志（threadtime 格式，带时间戳与裸 PID/TID）"
     },
     {
         "command": "adb logcat | findstr \"关键词\"",

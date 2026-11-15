@@ -17,6 +17,10 @@ class WeakNetworkDialog(QDialog):
     show_info_signal = Signal(str, str)
     show_warning_signal = Signal(str, str)
     show_critical_signal = Signal(str, str)
+    residual_found = Signal(list)      # 启动检测到残留规则时发射（网卡名列表）
+
+    # 启动时检查残留规则涉及的网卡（与下拉框默认项保持一致）
+    RESIDUAL_CHECK_IFACES = ("wlan0", "eth0", "rmnet0")
 
     def __init__(self, adb_manager, device_serial, parent=None):
         super().__init__(parent)
@@ -24,15 +28,23 @@ class WeakNetworkDialog(QDialog):
         self.device_serial = device_serial
         self.tc_path = None
         self._processing = False
+        # 是否已有弱网规则生效，以及生效在哪块网卡上
+        # 关闭对话框/退出程序时需要据此自动恢复网络，避免设备残留规则导致断网
+        self._applied = False
+        self._applied_iface = None
+        self._closing = False       # 是否正在关闭（用于丢弃后台检测的迟到回调）
         self.setWindowTitle("弱网模拟")
         self.resize(450, 320)
         self.setup_ui()
         self.connect_signals()
+        # 打开即后台检查上次是否留下未清理的规则（不阻塞界面）
+        self._start_residual_check()
 
     def connect_signals(self):
         self.show_info_signal.connect(self._show_info)
         self.show_warning_signal.connect(self._show_warning)
         self.show_critical_signal.connect(self._show_critical)
+        self.residual_found.connect(self._on_residual_found)
 
     @Slot(str, str)
     def _show_info(self, title, text):
@@ -57,7 +69,7 @@ class WeakNetworkDialog(QDialog):
         )
         info.setWordWrap(True)
         info.setStyleSheet(
-            "background-color: #f8d7da; color: #721c24; padding: 8px; border-radius: 4px; font-weight: bold;"
+            "background-color: #FBEFEC; color: #8C3A2B; padding: 8px; border-radius: 4px; font-weight: bold;"
         )
         layout.addWidget(info)
 
@@ -87,24 +99,10 @@ class WeakNetworkDialog(QDialog):
 
         # ---- 场景说明按钮：蓝色，始终启用 ----
         self.help_btn = QPushButton("场景说明")
-        self.help_btn.setIcon(qta.icon('fa6s.book', color='white'))
+        self.help_btn.setIcon(qta.icon('fa6s.book', color='#1F1D1A'))
         self.help_btn.setText(" 场景说明")
         self.help_btn.setFixedWidth(100)
         self.help_btn.setFixedHeight(32)
-        self.help_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #5dade2;
-            }
-            QPushButton:pressed {
-                background-color: #2980b9;
-            }
-        """)
         self.help_btn.clicked.connect(self.show_scene_help)
         scene_layout.addWidget(self.help_btn)
 
@@ -144,26 +142,7 @@ class WeakNetworkDialog(QDialog):
         self.apply_btn = QPushButton(" 应用")
         self.apply_btn.setIcon(qta.icon('fa6s.play', color='white'))
         self.apply_btn.setFixedHeight(32)
-        self.apply_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 180px;
-                max-width: 180px;
-            }
-            QPushButton:hover {
-                background-color: #2ecc71;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-            QPushButton:disabled {
-                background-color: #a9dfbf;
-                color: #d5f5e3;
-            }
-        """)
+        self.apply_btn.setObjectName("primaryBtn")
         self.apply_btn.clicked.connect(self.apply_limit)
 
         btn_layout.addWidget(self.apply_btn)
@@ -171,28 +150,9 @@ class WeakNetworkDialog(QDialog):
 
         # ---- 清除按钮：橙色 ----
         self.clear_btn = QPushButton(" 清除")
-        self.clear_btn.setIcon(qta.icon('fa6s.eraser', color='white'))
+        self.clear_btn.setIcon(qta.icon('fa6s.eraser', color='#B0761F'))
         self.clear_btn.setFixedHeight(32)
-        self.clear_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f39c12;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                min-width: 180px;
-                max-width: 180px;
-            }
-            QPushButton:hover {
-                background-color: #f5b041;
-            }
-            QPushButton:pressed {
-                background-color: #d68910;
-            }
-            QPushButton:disabled {
-                background-color: #f5d5a5;
-                color: #f5e6d0;
-            }
-        """)
+        self.clear_btn.setObjectName("warnBtn")
         self.clear_btn.clicked.connect(self.clear_limit)
 
         btn_layout.addWidget(self.clear_btn)
@@ -264,7 +224,10 @@ class WeakNetworkDialog(QDialog):
         """)
         layout.addWidget(text_edit)
 
-        dialog.exec()
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()      # 以 self 为父对象，不销毁会累积
 
     # ---------- 核心功能方法 ----------
     def _run_adb_shell(self, cmd, timeout=10):
@@ -367,6 +330,8 @@ class WeakNetworkDialog(QDialog):
                 if rc != 0:
                     success = False
                     error_detail = stderr or stdout or "未知错误"
+                    # 应用中途失败时回滚：否则会留下半套规则，设备侧网络处于异常状态
+                    self._run_tc_cmd(f"qdisc del dev {iface} root 2>/dev/null")
                     self.status_label.setText("应用失败")
                     # 恢复应用按钮（带图标）
                     self.apply_btn.setEnabled(True)
@@ -395,8 +360,13 @@ class WeakNetworkDialog(QDialog):
                     return
 
             if success:
-                self.status_label.setText("规则已生效")
-                self.show_info_signal.emit("成功", "弱网规则已生效")
+                self._applied = True
+                self._applied_iface = iface
+                self.status_label.setText(f"规则已生效（{iface}），关闭窗口时将自动恢复")
+                self.show_info_signal.emit(
+                    "成功",
+                    f"弱网规则已在 {iface} 上生效\n关闭窗口时会自动恢复网络"
+                )
 
             # 恢复应用按钮（带图标）
             self.apply_btn.setEnabled(True)
@@ -427,10 +397,12 @@ class WeakNetworkDialog(QDialog):
             # 恢复清除按钮（带图标）
             self.clear_btn.setEnabled(True)
             self.clear_btn.setText(" 清除")
-            self.clear_btn.setIcon(qta.icon('fa6s.eraser', color='white'))
+            self.clear_btn.setIcon(qta.icon('fa6s.eraser', color='#B0761F'))
             self._processing = False
 
             if rc == 0:
+                self._applied = False
+                self._applied_iface = None
                 self.status_label.setText("规则已清除")
                 self.show_info_signal.emit("成功", "网络限制已清除")
                 return
@@ -440,6 +412,8 @@ class WeakNetworkDialog(QDialog):
 
             # 情况1：没有规则需要清除（最常见）
             if err_msg and "No such file or directory" in err_msg:
+                self._applied = False
+                self._applied_iface = None
                 self.status_label.setText("无规则需清除")
                 self.show_info_signal.emit("提示", "当前网卡无任何限制规则")
                 return
@@ -475,3 +449,152 @@ class WeakNetworkDialog(QDialog):
                 )
 
         threading.Thread(target=worker, daemon=True).start()
+
+    # ---------- 自动恢复 ----------
+    def _notify_log(self, text):
+        """把恢复结果同步到主窗口日志（父窗口是 MainWindow 时）"""
+        parent = self.parent()
+        if parent is not None and hasattr(parent, 'append_log'):
+            try:
+                parent.append_log(text)
+            except Exception:
+                pass
+
+    def _restore_rules_sync(self):
+        """
+        同步清除已下发的 tc 规则。
+
+        这里刻意用同步方式而不是后台线程：关闭窗口/退出程序前必须确保规则已清掉，
+        否则对话框已销毁而线程还在跑，容易出现"规则没清掉、程序已退出"的断网残留。
+        """
+        iface = self._applied_iface or self.iface_combo.currentText().strip()
+        if not iface:
+            self._applied = False
+            self._applied_iface = None
+            return True, "未记录网卡，跳过恢复"
+
+        stdout, stderr, rc = self._run_tc_cmd(f"qdisc del dev {iface} root 2>/dev/null")
+        err = (stderr or stdout or "").strip()
+
+        # rc != 0 且提示 no such file 说明本来就没有规则，同样视为恢复完成
+        if rc == 0 or not err or "No such file or directory" in err:
+            self._applied = False
+            self._applied_iface = None
+            return True, iface
+
+        return False, f"{iface}：{err}"
+
+    # ---------- 残留规则检测 ----------
+    def _start_residual_check(self):
+        """
+        打开对话框时后台检查设备上是否残留上次未清理的弱网规则。
+
+        覆盖"程序被强杀 / 崩溃 / 直接拔线"这类没走到 closeEvent 的情况：
+        下次打开时第一时间发现并提示清除，避免设备一直处于限速丢包状态。
+        """
+        def worker():
+            try:
+                # 非 root 既读不准也清不掉，直接跳过，避免误报
+                stdout, _, _ = self._run_adb_shell("id")
+                if "uid=0" not in stdout:
+                    return
+
+                found = []
+                for iface in self.RESIDUAL_CHECK_IFACES:
+                    out, err, rc = self._run_tc_cmd(f"qdisc show dev {iface}")
+                    if rc != 0 or not out:
+                        continue
+                    low = out.lower()
+                    # netem 一定是弱网规则；htb handle 1: 是本工具带限速时下发的特征
+                    if "netem" in low or "handle 1: htb" in low:
+                        found.append(iface)
+                if found:
+                    self.residual_found.emit(found)
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @Slot(list)
+    def _on_residual_found(self, ifaces):
+        """主线程处理：提示用户是否清除残留规则"""
+        # 检测在后台线程中进行，若用户已关闭窗口则不再弹窗打扰
+        if self._closing:
+            return
+
+        names = "、".join(ifaces)
+        reply = QMessageBox.question(
+            self, "检测到残留弱网规则",
+            f"设备上存在上次未清理的弱网规则（网卡：{names}）。\n"
+            f"这会让设备表现为变慢、丢包甚至断网。\n\n是否立即清除？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if reply == QMessageBox.Yes:
+            self._clear_residual(ifaces)
+        else:
+            self.status_label.setText(f"⚠ 检测到残留规则（{names}），未清除")
+            self._notify_log(
+                f"<span style='color:#B0761F;'>⚠ 检测到残留弱网规则（{names}），按用户选择保留</span>"
+            )
+
+    def _clear_residual(self, ifaces):
+        """清除启动时检测到的残留规则（后台执行，结果写日志）"""
+        self.status_label.setText("正在清除残留规则...")
+
+        def worker():
+            ok_list, fail_list = [], []
+            for iface in ifaces:
+                out, err, rc = self._run_tc_cmd(f"qdisc del dev {iface} root 2>/dev/null")
+                msg = (err or out or "").strip()
+                if rc == 0 or not msg or "No such file or directory" in msg:
+                    ok_list.append(iface)
+                else:
+                    fail_list.append(f"{iface}：{msg}")
+
+            if ok_list:
+                self._notify_log(
+                    f"<span style='color:#2F6B45;'>✅ 已清除残留弱网规则：{'、'.join(ok_list)}</span>"
+                )
+            if fail_list:
+                self.status_label.setText("残留规则清除失败")
+                self._notify_log(
+                    f"<span style='color:#A6402F;'>❌ 残留弱网规则清除失败：{'；'.join(fail_list)}</span>"
+                )
+                self.show_critical_signal.emit(
+                    "清除失败",
+                    "以下网卡的残留规则未能清除，请确认设备已 root：\n" + "\n".join(fail_list)
+                )
+            else:
+                self.status_label.setText("残留规则已清除")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def closeEvent(self, event):
+        """关闭窗口时自动恢复网络，避免设备残留弱网规则（表现为断网 / 无限卡顿）"""
+        if self._processing:
+            QMessageBox.information(self, "提示", "操作正在进行中，请稍候再关闭。")
+            event.ignore()
+            return
+
+        if self._applied:
+            ok, detail = self._restore_rules_sync()
+            if ok:
+                self._notify_log(
+                    f"<span style='color:#2F6B45;'>✅ 已自动恢复网卡 {detail} 的网络限制</span>"
+                )
+            else:
+                self._notify_log(
+                    f"<span style='color:#A6402F;'>❌ 弱网规则自动恢复失败（{detail}）</span>"
+                )
+                iface = self._applied_iface or self.iface_combo.currentText().strip()
+                QMessageBox.warning(
+                    self, "恢复失败",
+                    f"弱网规则未能自动恢复，设备可能仍处于限速 / 丢包状态。\n\n"
+                    f"请重新打开本窗口点击「清除」，或手动执行：\n"
+                    f"adb shell tc qdisc del dev {iface} root\n\n"
+                    f"错误信息：{detail}"
+                )
+
+        self._closing = True
+        event.accept()
