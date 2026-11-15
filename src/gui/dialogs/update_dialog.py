@@ -99,8 +99,8 @@ class UpdateDialog(QDialog):
         meta_parts = []
         if self.info.date_text:
             meta_parts.append(f"发布于 {self.info.date_text}")
-        if self.info.size_text:
-            meta_parts.append(self.info.size_text)
+        if self.info.download_size_text:
+            meta_parts.append(self.info.download_size_text)
         meta_parts.append("下载后自动校验完整性")
         meta = QLabel(" · ".join(meta_parts))
         meta.setStyleSheet("color:#6E675D; font-size:12px;")

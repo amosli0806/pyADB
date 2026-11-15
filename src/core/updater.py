@@ -11,7 +11,10 @@
 4. **限流要说人话**：403 + 配额耗尽时提示「请在 HH:MM 后重试」，而不是一句 HTTP 403。
 5. **下载稳健性**：GitHub 实体域名国内常超时，下载走加速镜像；失败 3 次自动重试，
    并支持从 .part 断点续传；下载完按 sha256（GitHub 资产摘要）逐字节校验。
-6. **安装**：本体是单文件 exe，无法自替换，改为释放一个 .bat 等待进程退出后覆盖并重启。
+6. **增量更新**：Release 里若有同名 patch-<from>-to-<to>.dpatch，优先下补丁 ——
+   只传变化的那几 MB 业务代码，Qt 之类的库从本机旧安装复用；补丁出任何问题都回退全量。
+7. **安装**：onedir 包整目录替换（补丁组装的目录与解压出来的目录走同一套替换脚本），
+   释放一个 .bat 等进程退出后改名换目录并重启，失败自动回滚。
 """
 
 import hashlib
@@ -61,6 +64,16 @@ ASSET_PREFIX = "bugcatcher-"
 ASSET_SUFFIX = "-win64.zip"
 EXE_ASSET_FALLBACK = True       # 找不到 zip 时退回单文件 exe（兼容早期发布）
 
+# ---------- 增量更新（文件级补丁）----------
+# 思路照搬虫师：更新包里真正每次变的只有业务代码，PySide6 那几十 MB 的 Qt 库
+# 在版本之间一个字节都不变。补丁只传"新增或变化"的文件，其余从本机旧安装复制。
+# 产物命名必须是 patch-<起点>-to-<目标>.dpatch，绝不能长得像 .zip ——
+# 老客户端的 _pick_asset 只挑 .zip，补丁一旦像全量包会被它当全量包下载。
+PATCH_ASSET_TEMPLATE = "patch-{from_ver}-to-{to_ver}.dpatch"
+PATCH_MANIFEST_NAME = "manifest.json"
+PATCH_PAYLOAD_DIR = "payload"
+PATCH_FORMAT = 1
+
 # ---------- 检查节流 ----------
 _CHECK_MIN_INTERVAL = 30.0
 _last_check = {"at": 0.0, "result": None}
@@ -87,6 +100,11 @@ class UpdateInfo:
         self.digest = str(data.get("digest", "") or "")
         # 旧版 Gitee version.json 里的 md5（有就校验，没有就跳过）
         self.md5 = str(data.get("md5", "") or "")
+        # 增量补丁：Release 里存在同名 patch 资产时才有值
+        self.patch_name = str(data.get("patch_name", "") or "")
+        self.patch_url = str(data.get("patch_url", "") or "")
+        self.patch_size = int(data.get("patch_size", 0) or 0)
+        self.patch_digest = str(data.get("patch_digest", "") or "")
 
     @property
     def sha256(self) -> str:
@@ -95,11 +113,24 @@ class UpdateInfo:
         return d.split("sha256:", 1)[1] if d.startswith("sha256:") else ""
 
     @property
+    def patch_sha256(self) -> str:
+        d = self.patch_digest.strip().lower()
+        return d.split("sha256:", 1)[1] if d.startswith("sha256:") else ""
+
+    @property
     def size_text(self) -> str:
         if self.asset_size <= 0:
             return ""
         mb = self.asset_size / 1024 / 1024
         return f"{mb:.1f} MB" if mb >= 1 else f"{self.asset_size / 1024:.0f} KB"
+
+    @property
+    def download_size_text(self) -> str:
+        """实际要下的体积：有增量补丁就报补丁大小，否则报全量"""
+        if self.patch_size > 0:
+            mb = self.patch_size / 1024 / 1024
+            return f"增量 {mb:.1f} MB" if mb >= 1 else f"增量 {self.patch_size / 1024:.0f} KB"
+        return self.size_text
 
     @property
     def date_text(self) -> str:
@@ -218,12 +249,26 @@ class Updater(QObject):
         return {}
 
     @staticmethod
-    def _info_from_github(data: dict) -> UpdateInfo:
+    def _pick_patch_asset(assets, from_version: str, to_version: str):
+        """
+        精确匹配 patch-<from>-to-<to>.dpatch。
+
+        不做模糊匹配：补丁的起点版本必须和用户当前版本完全对上，
+        拿错补丁组装出来的目录是坏的，宁可退回全量下载。
+        """
+        want = PATCH_ASSET_TEMPLATE.format(from_ver=from_version, to_ver=to_version)
+        for a in assets or []:
+            if str(a.get("name") or "").strip() == want:
+                return a
+        return {}
+
+    def _info_from_github(self, data: dict) -> UpdateInfo:
         """GitHub Release -> UpdateInfo：优先挑整包 zip，兼容早期的单文件 exe"""
         tag = str(data.get("tag_name") or "").strip()
         version = tag[1:] if tag[:1].lower() == "v" else tag
 
         asset = Updater._pick_asset(data.get("assets"))
+        patch = Updater._pick_patch_asset(data.get("assets"), self.current_version, version)
 
         body = str(data.get("body") or "")
         # 兼容在说明里写 MD5 的老做法（GitHub 资产本身带 sha256 时优先用 sha256）
@@ -240,6 +285,10 @@ class Updater(QObject):
             "html_url": str(data.get("html_url") or ""),
             "digest": str(asset.get("digest") or ""),
             "md5": m.group(1) if m else "",
+            "patch_name": str(patch.get("name") or ""),
+            "patch_url": str(patch.get("browser_download_url") or ""),
+            "patch_size": int(patch.get("size") or 0),
+            "patch_digest": str(patch.get("digest") or ""),
         })
 
     def check_for_updates(self, force: bool = False):
@@ -339,7 +388,10 @@ class Updater(QObject):
         if progress_callback:
             self.download_progress.connect(progress_callback)
 
-        url = url or (self._update_info.download_url if self._update_info else "")
+        info = self._update_info
+        # 有增量补丁就优先下补丁：一次更新从上百 MB 降到几 MB
+        patch_mode = bool(url is None and info and info.patch_url)
+        url = url or (info.patch_url if patch_mode else (info.download_url if info else ""))
         if not url:
             self.download_finished.emit(False, "该版本没有提供安装包")
             return
@@ -347,7 +399,17 @@ class Updater(QObject):
         def worker():
             self._is_cancelled = False
             try:
-                path = self._download(url)
+                if patch_mode:
+                    try:
+                        path = self._download(url, patch=True)
+                    except UpdateCancelled:
+                        raise
+                    except Exception:
+                        # 补丁坏了/下载失败/校验不过 —— 回退全量，不能让用户卡在这
+                        self._cleanup_temp_file()
+                        path = self._download(info.download_url, patch=False)
+                else:
+                    path = self._download(url, patch=False)
                 self.download_finished.emit(True, path)
             except UpdateCancelled:
                 self._cleanup_temp_file()
@@ -358,17 +420,25 @@ class Updater(QObject):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _download(self, url: str) -> str:
-        name = (self._update_info.asset_name if self._update_info else "") or ""
-        ext = os.path.splitext(name)[1].lower() or (
-            ".zip" if url.lower().split("?")[0].endswith(".zip") else ".exe")
-        fd, target = tempfile.mkstemp(suffix=ext, prefix="bugcatcher_update_")
+    def _download(self, url: str, patch: bool = False) -> str:
+        info = self._update_info
+        if patch:
+            ext = ".dpatch"
+            size_hint = info.patch_size if info else 0
+            prefix = "bugcatcher_patch_"
+        else:
+            name = (info.asset_name if info else "") or ""
+            ext = os.path.splitext(name)[1].lower() or (
+                ".zip" if url.lower().split("?")[0].endswith(".zip") else ".exe")
+            size_hint = info.asset_size if info else 0
+            prefix = "bugcatcher_update_"
+
+        fd, target = tempfile.mkstemp(suffix=ext, prefix=prefix)
         os.close(fd)
         self._temp_file = target
         self._part_file = target + ".part"
 
         dl_url = _mirrored_url(url)
-        size_hint = self._update_info.asset_size if self._update_info else 0
 
         last_err = None
         for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
@@ -388,7 +458,7 @@ class Updater(QObject):
         else:
             raise RuntimeError(f"{last_err}（已重试 {_DOWNLOAD_ATTEMPTS - 1} 次）")
 
-        self._verify(target)
+        self._verify(target, patch=patch)
         return target
 
     def _download_once(self, url: str, part: str, size_hint: int):
@@ -418,10 +488,15 @@ class Updater(QObject):
                     done += len(chunk)
                     self.download_progress.emit(done, total)
 
-    def _verify(self, path: str):
+    def _verify(self, path: str, patch: bool = False):
         """优先 sha256（GitHub 资产摘要），其次 md5（version.json 里写的），都没有就跳过"""
         info = self._update_info
         if not info:
+            return
+        if patch:
+            expect = info.patch_sha256
+            if expect and _sha256_of(path) != expect:
+                raise RuntimeError("补丁校验失败（sha256 不符）")
             return
         if info.sha256:
             if _sha256_of(path) != info.sha256:
@@ -472,6 +547,71 @@ class Updater(QObject):
                 return inner
         raise RuntimeError("更新包里没有找到可执行文件，包可能已损坏")
 
+    @staticmethod
+    def _safe_join(root: str, rel: str) -> str:
+        """拼路径并挡住 ../ 之类的越界（补丁内容来自网络，不能无条件信任）"""
+        root_abs = os.path.abspath(root)
+        target = os.path.abspath(os.path.join(root_abs, rel))
+        if not (target == root_abs or target.startswith(root_abs + os.sep)):
+            raise RuntimeError(f"补丁里的路径越界：{rel}")
+        return target
+
+    def _assemble_from_patch(self, patch_path: str, install_dir: str) -> str:
+        """
+        按补丁在本机拼出新版本目录，返回它的路径。
+
+        清单列的是**新版本的完整文件清单**：进了 payload 的用补丁里的内容，
+        其余的从当前安装复制（顺带校验 sha256）。于是几十 MB 的 Qt 库一个字节都不用下。
+        任何一步不对就抛异常 —— 调用方（界面）可以据此退回全量下载。
+        """
+        staging = install_dir + ".new"
+        if os.path.exists(staging):
+            shutil.rmtree(staging, ignore_errors=True)
+        os.makedirs(staging, exist_ok=True)
+
+        with zipfile.ZipFile(patch_path) as z:
+            bad = z.testzip()
+            if bad:
+                raise RuntimeError(f"增量补丁损坏（第一个坏文件：{bad}）")
+            try:
+                manifest = json.loads(z.read(PATCH_MANIFEST_NAME).decode("utf-8"))
+            except KeyError:
+                raise RuntimeError("增量补丁缺少 manifest.json")
+            except Exception as e:
+                raise RuntimeError(f"增量补丁清单无法解析：{e}")
+
+            if int(manifest.get("format") or 0) != PATCH_FORMAT:
+                raise RuntimeError(f"增量补丁格式不支持：{manifest.get('format')!r}")
+
+            files = manifest.get("files") or {}
+            if not files:
+                raise RuntimeError("增量补丁清单是空的")
+            payload = set(manifest.get("payload") or [])
+
+            for rel, meta in files.items():
+                dst = self._safe_join(staging, rel)
+                if os.path.dirname(dst):
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+
+                if rel in payload:
+                    with z.open(f"{PATCH_PAYLOAD_DIR}/{rel}") as src, open(dst, "wb") as out:
+                        shutil.copyfileobj(src, out, 1024 * 1024)
+                    continue
+
+                src_path = self._safe_join(install_dir, rel)
+                if not os.path.exists(src_path):
+                    raise RuntimeError(f"本机缺少文件，无法增量更新：{rel}")
+                shutil.copy2(src_path, dst)
+
+                # reuse=True（打包必抖的文件，如 onefile exe）：哈希对不上视为构建抖动，
+                # 复用旧文件继续；本机缺失上面已经拦住了。
+                if not bool(meta.get("reuse")):
+                    expect = str(meta.get("sha256") or "")
+                    if expect and _sha256_of(dst) != expect:
+                        raise RuntimeError(f"本机文件与该版本清单不一致：{rel}")
+
+        return staging
+
     def apply_update(self, downloaded_file_path: str):
         """释放替换脚本并退出，由脚本在本进程结束后替换目录/文件并重启"""
         if not getattr(sys, "frozen", False):
@@ -483,7 +623,10 @@ class Updater(QObject):
         self._stop_background_processes(install_dir)
 
         try:
-            if downloaded_file_path.lower().endswith(".zip"):
+            if downloaded_file_path.lower().endswith(".dpatch"):
+                payload = self._assemble_from_patch(downloaded_file_path, install_dir)
+                script = self._create_swap_script(install_dir, payload, current_exe, downloaded_file_path)
+            elif downloaded_file_path.lower().endswith(".zip"):
                 payload = self._extract_package(downloaded_file_path, install_dir)
                 script = self._create_swap_script(install_dir, payload, current_exe, downloaded_file_path)
             else:

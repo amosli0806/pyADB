@@ -69,6 +69,39 @@ jobs:
           " "$VER"
           ls -lh *.zip
 
+      - name: 生成增量补丁（对比上一个 Release；失败只跳过，不阻塞发版）
+        id: mkpatch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -u
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VER="${TAG#v}"
+          PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^{}" 2>/dev/null || true)"
+          if [ -z "$PREV_TAG" ]; then
+            echo "没有上一个 tag，跳过增量补丁"; echo "patch=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          PREV="${PREV_TAG#v}"
+          rm -rf prev_dl prev_tree; mkdir -p prev_dl prev_tree
+          if ! gh release download "$PREV_TAG" --pattern 'bugcatcher-*-win64.zip' --dir prev_dl --clobber; then
+            echo "拿不到上一个 Release 的全量包，跳过"; echo "patch=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          PREV_ZIP="$(ls prev_dl/bugcatcher-*-win64.zip 2>/dev/null | head -1 || true)"
+          [ -z "$PREV_ZIP" ] && { echo "上一个 Release 无全量包"; echo "patch=" >> "$GITHUB_OUTPUT"; exit 0; }
+          python -c "import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$PREV_ZIP" prev_tree
+          # 上一个包解压后多一层「捕虫师/」，本次 --new-tree 直接指向 dist_release/捕虫师
+          OLD_TREE="prev_tree/捕虫师"
+          [ -d "$OLD_TREE" ] || OLD_TREE="prev_tree"
+          PATCH_OUT="patch-${PREV}-to-${VER}.dpatch"
+          if ! python tools/make_update_patch.py \
+                 --old-tree "$OLD_TREE" --new-tree "dist_release/捕虫师" \
+                 --from "$PREV" --to "$VER" --out "$PATCH_OUT"; then
+            echo "补丁没生成（不够小 / 输入异常），跳过 —— 不影响全量发版"
+            echo "patch=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "patch=$PATCH_OUT" >> "$GITHUB_OUTPUT"
+
       - name: 创建或更新 Release
         shell: bash
         env:
@@ -77,10 +110,16 @@ jobs:
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VER="${TAG#v}"
           ASSET="bugcatcher-${VER}-win64.zip"
+          PATCH="${{ steps.mkpatch.outputs.patch }}"
+          FILES="$ASSET"
+          if [ -n "$PATCH" ] && [ -f "$PATCH" ]; then
+            FILES="$FILES $PATCH"
+            echo "同时上传增量补丁：$PATCH"
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$ASSET" --clobber
+            gh release upload "$TAG" $FILES --clobber
           else
-            gh release create "$TAG" "$ASSET" \
+            gh release create "$TAG" $FILES \
               --title "捕虫师 $TAG" \
               --generate-notes
           fi

@@ -561,7 +561,8 @@ class MainWindow(QMainWindow):
 
         self.updater.download_progress.connect(on_progress)
         self.updater.download_finished.connect(on_download_finished)
-        self.updater.download_update(update_info.download_url)
+        # 不传 url：让 updater 自己决定「有增量补丁就先下补丁」，失败会退回全量
+        self.updater.download_update()
 
         # 取消时调用 cancel_download
         progress.canceled.connect(
