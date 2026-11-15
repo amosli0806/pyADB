@@ -2,7 +2,7 @@
   "version": "2.3.0",
   "release_notes": "修复关闭后残留进程与内存泄漏；界面视觉重做；检查更新改走 GitHub Releases。",
   "download_url": "https://github.com/amosli0806/pyADB/releases/download/v2.3.0/bugcatcher-2.3.0-win64.zip",
-  "md5": "641097e8ae591d9c94450c492b74de89",
+  "md5": "44e93d9869df221f6e696bb3bbd76c2f",
   "force_update": false,
   "min_supported_version": "2.0.0"
 }
