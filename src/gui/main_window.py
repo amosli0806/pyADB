@@ -544,6 +544,12 @@ class MainWindow(QMainWindow):
                 progress.setLabelText(f"正在下载更新... {received / 1024 / 1024:.1f} MB")
 
         def on_download_finished(success, result):
+            # 先断开 canceled：QProgressDialog 关闭时也会发这个信号，
+            # 不断开就会在"下载完成"后触发 cancel，把刚下好的包删掉
+            try:
+                progress.canceled.disconnect()
+            except (RuntimeError, TypeError):
+                pass
             progress.close()
             progress.deleteLater()     # 以 self 为父对象，不销毁会累积
             if success:

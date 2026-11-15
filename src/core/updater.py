@@ -206,6 +206,7 @@ class Updater(QObject):
         self._temp_file = None
         self._part_file = None
         self._is_cancelled = False
+        self._downloading = False      # 是否正在下载（决定 cancel 能不能清理临时文件）
 
     # ---------------- 检查更新 ----------------
     @staticmethod
@@ -366,6 +367,15 @@ class Updater(QObject):
 
     # ---------------- 下载 ----------------
     def cancel_download(self):
+        """
+        只在**下载进行中**才有意义。
+
+        为什么加这道判断：界面上的 QProgressDialog 关闭时也会发 canceled 信号，
+        而下载完成时我们正好要先 close 掉它 —— 那时若照旧执行清理，
+        刚下好的更新包会被删掉，用户点「重启」就报「No such file or directory」。
+        """
+        if not self._downloading:
+            return
         self._is_cancelled = True
         self._cleanup_temp_file()
 
@@ -398,6 +408,7 @@ class Updater(QObject):
 
         def worker():
             self._is_cancelled = False
+            self._downloading = True
             try:
                 if patch_mode:
                     try:
@@ -410,11 +421,15 @@ class Updater(QObject):
                         path = self._download(info.download_url, patch=False)
                 else:
                     path = self._download(url, patch=False)
+                # 先收旗再发信号：界面收到信号会关闭进度框，进而触发 canceled
+                self._downloading = False
                 self.download_finished.emit(True, path)
             except UpdateCancelled:
+                self._downloading = False
                 self._cleanup_temp_file()
                 self.download_finished.emit(False, "用户取消")
             except Exception as e:
+                self._downloading = False
                 self._cleanup_temp_file()
                 self.download_finished.emit(False, f"下载失败：{e}")
 
@@ -616,6 +631,11 @@ class Updater(QObject):
         """释放替换脚本并退出，由脚本在本进程结束后替换目录/文件并重启"""
         if not getattr(sys, "frozen", False):
             QMessageBox.information(None, "提示", "开发环境不支持自动更新，请在打包后的版本中使用")
+            return
+
+        if not downloaded_file_path or not os.path.exists(downloaded_file_path):
+            QMessageBox.critical(None, "更新失败",
+                                 "更新包已不存在（可能被清理工具或杀毒软件删掉），请重新检查更新后再试。")
             return
 
         current_exe = sys.executable
