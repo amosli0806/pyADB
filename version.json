@@ -1,7 +1,7 @@
 {
-  "version": "2.4.3",
-  "release_notes": "修复更新失败：下载完成后点「重启」会提示「准备更新文件失败：No such file or directory」。原因是关闭下载进度框时 QProgressDialog 会发出 canceled 信号，被误当成用户取消，把刚下好的更新包删掉了。",
-  "download_url": "https://github.com/amosli0806/pyADB/releases/download/v2.4.3/bugcatcher-2.4.3-win64.zip",
+  "version": "2.4.4",
+  "release_notes": "新增启动封面：启动时先亮界面，带进度与阶段文案，不再点完图标半天没反应。重做更新下载框：显示下载速度、剩余时间，并标明这次下的是增量包还是完整包。下载改走多镜像回退（gh-proxy → ghfast → ghproxy → 直连），单个镜像限速时自动换源。",
+  "download_url": "https://github.com/amosli0806/pyADB/releases/download/v2.4.4/bugcatcher-2.4.4-win64.zip",
   "md5": "",
   "force_update": false,
   "min_supported_version": "2.0.0"
