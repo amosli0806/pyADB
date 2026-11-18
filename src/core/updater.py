@@ -683,12 +683,22 @@ class Updater(QObject):
 
         try:
             if sys.platform == "win32":
-                DETACHED_PROCESS = 0x00000008
-                subprocess.Popen(
-                    ["cmd", "/c", script],
-                    creationflags=DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
-                    close_fds=True,
-                )
+                if script.lower().endswith(".ps1"):
+                    # 只给 CREATE_NO_WINDOW：之前叠了 DETACHED_PROCESS，两者互相冲突，
+                    # 结果是 cmd 控制台反而可见（用户更新时看到的那个黑窗口）。
+                    subprocess.Popen(
+                        ["powershell", "-NoProfile", "-NonInteractive",
+                         "-ExecutionPolicy", "Bypass", "-File", script],
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        close_fds=True,
+                    )
+                else:
+                    DETACHED_PROCESS = 0x00000008
+                    subprocess.Popen(
+                        ["cmd", "/c", script],
+                        creationflags=DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
+                        close_fds=True,
+                    )
             else:
                 subprocess.Popen(["/bin/sh", script], start_new_session=True)
         except Exception as e:
@@ -711,37 +721,67 @@ class Updater(QObject):
         log = os.path.join(parent, "update_error.log")
 
         if sys.platform == "win32":
-            content = f'''@echo off
-setlocal enabledelayedexpansion
-chcp 65001 >nul
-rem 等待本体退出
-timeout /t 2 /nobreak >nul
-set N=0
-:retry
-if exist "{bak}" rmdir /s /q "{bak}" >nul 2>&1
-move "{install_dir}" "{bak}" >nul 2>&1
-if not errorlevel 1 goto swapped
-set /a N+=1
-if !N! geq 20 goto fail
-timeout /t 1 /nobreak >nul
-goto retry
-:swapped
-move "{new_dir}" "{install_dir}" >nul 2>&1
-if errorlevel 1 goto rollback
-start "" "{current_exe}"
-del "{zip_path}" >nul 2>&1
-rmdir /s /q "{bak}" >nul 2>&1
-del "%~f0" >nul 2>&1
-exit /b 0
-:rollback
-move "{bak}" "{install_dir}" >nul 2>&1
-:fail
-echo 更新失败：文件被占用，已回滚到原版本。> "{log}"
-start "" "{current_exe}"
-del "%~f0" >nul 2>&1
-exit /b 1
+            # 为什么用 .ps1 而不是 .bat：
+            # 安装目录叫「捕虫师」，.bat 由 cmd 按当前代码页（GBK）逐行解析，
+            # 而我们写文件用的是 UTF-8 —— 中文路径被读成乱码，move 一律失败。
+            # 线上的表现就是：弹出一个 cmd 窗口、旧目录没换掉、应用也没起来。
+            # .ps1 用 -File 读取带 BOM 的 UTF-8，中文路径不会出错；
+            # 顺便把「等 2 秒」换成「轮询 PID」，本体重启慢时也不会抢锁。
+            content = f'''$ErrorActionPreference = 'SilentlyContinue'
+$install = '{install_dir}'
+$newDir  = '{new_dir}'
+$bak     = '{bak}'
+$exe     = '{current_exe}'
+$zip     = '{zip_path}'
+$log     = '{log}'
+$self    = $PSCommandPath
+
+function Note($msg) {{
+    Add-Content -LiteralPath $log -Value ("[{{0}}] {{1}}" -f (Get-Date -Format 'HH:mm:ss'), $msg) -Encoding UTF8
+}}
+
+Note "开始更新，等待本体退出"
+for ($i = 0; $i -lt 150; $i++) {{
+    if (-not (Get-Process -Id {os.getpid()} -ErrorAction SilentlyContinue)) {{ break }}
+    Start-Sleep -Milliseconds 200
+}}
+Start-Sleep -Milliseconds 600
+
+$moved = $false
+for ($i = 0; $i -lt 40; $i++) {{
+    if (Test-Path -LiteralPath $bak) {{ Remove-Item -LiteralPath $bak -Recurse -Force }}
+    Move-Item -LiteralPath $install -Destination $bak -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $bak) {{ $moved = $true; break }}
+    Start-Sleep -Milliseconds 500
+}}
+
+if (-not $moved) {{
+    Note "旧目录改名失败：文件被占用，保持原版本"
+    Start-Process -FilePath $exe
+    Remove-Item -LiteralPath $self -Force
+    exit 1
+}}
+
+Move-Item -LiteralPath $newDir -Destination $install -ErrorAction SilentlyContinue
+$ok = Test-Path -LiteralPath (Join-Path $install '捕虫师.exe')
+if (-not $ok) {{
+    Note "新目录落位失败，回滚"
+    if (Test-Path -LiteralPath $install) {{ Remove-Item -LiteralPath $install -Recurse -Force }}
+    Move-Item -LiteralPath $bak -Destination $install -ErrorAction SilentlyContinue
+    Start-Process -FilePath $exe
+    Remove-Item -LiteralPath $self -Force
+    exit 1
+}}
+
+Note "更新完成，启动新版本"
+Start-Process -FilePath $exe
+Remove-Item -LiteralPath $zip -Force
+Remove-Item -LiteralPath $bak -Recurse -Force
+Remove-Item -LiteralPath $log -Force
+Remove-Item -LiteralPath $self -Force
+exit 0
 '''
-            path = os.path.join(parent, "bugcatcher_update.bat")
+            path = os.path.join(parent, "bugcatcher_update.ps1")
         else:
             content = f'''#!/bin/sh
 sleep 2
@@ -755,7 +795,10 @@ rm -f "$0"
 '''
             path = os.path.join(parent, "bugcatcher_update.sh")
 
-        with open(path, "w", encoding="utf-8") as f:
+        # .ps1 必须带 BOM：Windows PowerShell 5.1 读无 BOM 的 UTF-8 会按 ANSI 解析，
+        # 中文路径又会被打乱 —— 这正是 .bat 版本更新失败的原因，别在 .ps1 上重蹈
+        encoding = "utf-8-sig" if path.lower().endswith(".ps1") else "utf-8"
+        with open(path, "w", encoding=encoding) as f:
             f.write(content)
         return path
 
@@ -768,30 +811,37 @@ rm -f "$0"
         用 .bat 只依赖系统 cmd：等 2 秒让本进程退出后覆盖，再拉起新版本。
         """
         if sys.platform == "win32":
-            content = f'''@echo off
-setlocal enabledelayedexpansion
-chcp 65001 >nul
-rem 等待本体退出
-timeout /t 2 /nobreak >nul
-set N=0
-:retry
-copy /y "{downloaded_file}" "{current_exe}" >nul 2>&1
-if not errorlevel 1 goto done
-set /a N+=1
-if !N! geq 20 goto fail
-timeout /t 1 /nobreak >nul
-goto retry
-:done
-start "" "{current_exe}"
-del "{downloaded_file}" >nul 2>&1
-del "%~f0" >nul 2>&1
-exit /b 0
-:fail
-echo 更新失败：文件被占用，请手动替换。> "{os.path.splitext(current_exe)[0]}_update_error.log"
-del "%~f0" >nul 2>&1
-exit /b 1
+            # 与整目录替换同理：.ps1 + BOM + 轮询 PID，避开 cmd 的中文路径编码问题
+            content = f'''$ErrorActionPreference = 'SilentlyContinue'
+$src  = '{downloaded_file}'
+$dst  = '{current_exe}'
+$self = $PSCommandPath
+$log  = '{os.path.splitext(current_exe)[0]}_update_error.log'
+
+for ($i = 0; $i -lt 150; $i++) {{
+    if (-not (Get-Process -Id {os.getpid()} -ErrorAction SilentlyContinue)) {{ break }}
+    Start-Sleep -Milliseconds 200
+}}
+Start-Sleep -Milliseconds 500
+
+$done = $false
+for ($i = 0; $i -lt 40; $i++) {{
+    Copy-Item -LiteralPath $src -Destination $dst -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $src)) {{ $done = $true; break }}
+    if ((Get-Item -LiteralPath $dst).Length -eq (Get-Item -LiteralPath $src).Length) {{ $done = $true; break }}
+    Start-Sleep -Milliseconds 500
+}}
+
+if (-not $done) {{
+    Add-Content -LiteralPath $log -Value "更新失败：文件被占用，请手动替换。" -Encoding UTF8
+}}
+
+Start-Process -FilePath $dst
+Remove-Item -LiteralPath $src -Force
+Remove-Item -LiteralPath $self -Force
+exit 0
 '''
-            path = os.path.join(tempfile.gettempdir(), "bugcatcher_update.bat")
+            path = os.path.join(tempfile.gettempdir(), "bugcatcher_update.ps1")
         else:
             content = f'''#!/bin/sh
 sleep 2
@@ -801,6 +851,7 @@ rm -f "$0"
 '''
             path = os.path.join(tempfile.gettempdir(), "bugcatcher_update.sh")
 
-        with open(path, "w", encoding="utf-8") as f:
+        encoding = "utf-8-sig" if path.lower().endswith(".ps1") else "utf-8"
+        with open(path, "w", encoding=encoding) as f:
             f.write(content)
         return path

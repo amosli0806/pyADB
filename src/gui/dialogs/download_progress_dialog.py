@@ -139,6 +139,9 @@ class DownloadProgressDialog(QDialog):
 
         self.setStyleSheet("""
             QDialog { background-color: #FFFFFF; }
+            /* 全局 QSS 里 QDialog 是米色，标签带自己的样式表时会渲成米色块，
+               这里必须显式声明透明，否则标题后面会留一条底色 */
+            QLabel { background: transparent; }
             QProgressBar#dlProgress {
                 background-color: #EFEDE7;
                 border: none;
