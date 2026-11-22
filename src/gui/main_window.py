@@ -564,35 +564,8 @@ class MainWindow(QMainWindow):
             progress.set_progress(received, total)
 
         def on_download_finished(success, result):
-            for sig, slot in ((self.updater.download_progress, on_progress),):
-                try:
-                    sig.disconnect(slot)
-                except (RuntimeError, TypeError) as exc:
-                    logger.debug("忽略异常（_start_download）: %s", exc, exc_info=True)
-            # 先断开 canceled：关闭窗口本身也会触发取消逻辑
-            try:
-                progress.canceled.disconnect()
-            except (RuntimeError, TypeError) as exc:
-                logger.debug("忽略异常（_start_download）: %s", exc, exc_info=True)
-
-            if success:
-                progress.set_stage("正在校验并准备安装…")
-                QApplication.processEvents()
-            progress.close()
-            progress.deleteLater()     # 以 self 为父对象，不销毁会累积
-
-            if success:
-                from src.gui.dialogs.update_dialog import UpdateReadyDialog
-                ready = UpdateReadyDialog(update_info, result, self)
-                self._exec_dialog(ready)
-                if ready.install_now and self.updater is not None:
-                    self.updater.apply_update(result)
-                else:
-                    self._release_updater()
-            else:
-                if result != "用户取消":  # 用户取消不弹出错误
-                    QMessageBox.critical(self, "下载失败", result)
-                self._release_updater()
+            self._detach_download_signals(progress, on_progress)
+            self._on_update_downloaded(success, result, update_info, progress)
 
         progress.canceled.connect(
             lambda: self.updater.cancel_download() if self.updater else None
@@ -602,6 +575,39 @@ class MainWindow(QMainWindow):
         # 不传 url：让 updater 自己决定「有增量补丁就先下补丁」，失败会退回全量
         self.updater.download_update()
         progress.show()
+
+    def _detach_download_signals(self, progress, on_progress):
+        """断开下载过程中的临时信号，避免关闭窗口触发重复回调"""
+        try:
+            self.updater.download_progress.disconnect(on_progress)
+        except (RuntimeError, TypeError) as exc:
+            logger.debug("忽略异常（_detach_download_signals）: %s", exc, exc_info=True)
+        # 先断开 canceled：关闭窗口本身也会触发取消逻辑
+        try:
+            progress.canceled.disconnect()
+        except (RuntimeError, TypeError) as exc:
+            logger.debug("忽略异常（_detach_download_signals）: %s", exc, exc_info=True)
+
+    def _on_update_downloaded(self, success, result, update_info, progress):
+        """下载收尾：成功则校验并询问安装，失败则按是否用户取消决定是否弹错"""
+        if success:
+            progress.set_stage("正在校验并准备安装…")
+            QApplication.processEvents()
+        progress.close()
+        progress.deleteLater()     # 以 self 为父对象，不销毁会累积
+
+        if success:
+            from src.gui.dialogs.update_dialog import UpdateReadyDialog
+            ready = UpdateReadyDialog(update_info, result, self)
+            self._exec_dialog(ready)
+            if ready.install_now and self.updater is not None:
+                self.updater.apply_update(result)
+            else:
+                self._release_updater()
+        else:
+            if result != "用户取消":  # 用户取消不弹出错误
+                QMessageBox.critical(self, "下载失败", result)
+            self._release_updater()
 
     # -------------------- 原有方法（未改动） --------------------
 
@@ -726,13 +732,27 @@ class MainWindow(QMainWindow):
             Toast.notify(self, "       请至少选中一条指令       ")
             return
 
+        # 运行中 / 全为预设 / 预设与自定义混选，三种情况的前置校验与确认都放在这里
+        if not self._confirm_delete ( selected ) :
+            return
+
+        # 执行删除（只删除自定义命令，预设由上面的校验拦下或跳过）
+        for cmd in selected :
+            if not cmd.is_preset :
+                self.command_manager.delete_command ( cmd.id )
+
+        self.command_list.refresh ( )
+        self._apply_display_filter ( )
+
+    def _confirm_delete ( self , selected ) :
+        """删除前的校验与确认，返回 True 表示可以继续删除"""
         # 检查是否有正在运行的命令
         running_ids = self.command_list.get_running_ids ( )
         running_selected = [ cmd for cmd in selected if cmd.id in running_ids ]
         if running_selected :
             names = '、'.join ( [ cmd.name for cmd in running_selected ] )
             QMessageBox.warning ( self , "无法删除" , f"以下命令正在执行中，请先停止后再删除：\n{names}" )
-            return
+            return False
 
         # 区分预设和自定义
         preset_cmds = [ cmd for cmd in selected if cmd.is_preset ]
@@ -741,7 +761,7 @@ class MainWindow(QMainWindow):
         # 如果全部是预设命令
         if not custom_cmds :
             Toast.notify(self, "       预设命令不可删除，请取消勾选后重试       ")
-            return
+            return False
 
         # 如果有预设命令，提示用户预设将被跳过
         if preset_cmds :
@@ -752,26 +772,15 @@ class MainWindow(QMainWindow):
                 f"以下预设命令不可删除，将跳过：\n{preset_names}\n\n"
                 f"确定要删除其余自定义指令吗？"
                 )
-            if reply != QMessageBox.Yes :
-                return
-            to_delete = custom_cmds
-        else :
-            # 全部是自定义命令，直接确认
-            reply = QMessageBox.question (
-                self ,
-                "删除" ,
-                f"      确定删除指令？       "
-                )
-            if reply != QMessageBox.Yes :
-                return
-            to_delete = custom_cmds
+            return reply == QMessageBox.Yes
 
-        # 执行删除（只删除自定义命令）
-        for cmd in to_delete :
-            self.command_manager.delete_command ( cmd.id )
-
-        self.command_list.refresh ( )
-        self._apply_display_filter ( )
+        # 全部是自定义命令，直接确认
+        reply = QMessageBox.question (
+            self ,
+            "删除" ,
+            f"      确定删除指令？       "
+            )
+        return reply == QMessageBox.Yes
 
     @Slot()
     def on_wireless(self):
@@ -1108,50 +1117,68 @@ class MainWindow(QMainWindow):
         if not current_device:
             self.show_warning("提示", "未检测到可用设备，请连接 Android 设备并授权 USB 调试")
             return
-        file_path, _ = QFileDialog.getOpenFileName(self, "选择 APK 文件", "", "APK文件 (*.apk);;所有文件 (*.*)")
+
+        file_path = self._pick_apk()
         if not file_path:
             return
+        filename = os.path.basename(file_path)
+
+        threading.Thread(
+            target=self._install_apk, args=(current_device, file_path, filename), daemon=True
+        ).start()
+
+    def _pick_apk(self):
+        """选择 APK 并做路径 / 文件名规范校验，返回文件路径或 None"""
+        file_path, _ = QFileDialog.getOpenFileName(self, "选择 APK 文件", "", "APK文件 (*.apk);;所有文件 (*.*)")
+        if not file_path:
+            return None
         if re.search(r'[\u4e00-\u9fff]', file_path):
             self.show_warning("路径错误", "APK 文件路径不能包含中文字符，请将文件移动到不含中文的目录后重试")
-            return
+            return None
         filename = os.path.basename(file_path)
         if re.search(r'\([0-9]+\)', filename):
             self.show_warning("文件名不规范", "APK 文件名包含类似 '(1)' 的字符，请重命名文件（移除括号及数字）后再试")
-            return
+            return None
+        return file_path
 
-        def install_worker():
-            try:
-                cmd = AdbClient(serial=current_device).command(
-                    ["install", "-r", "-t", "-d", "-g", file_path])
-                self.append_log(f"<span style='color:blue;'>开始安装: {filename} 到设备 {current_device}</span>")
-                creationflags = 0
-                if sys.platform == 'win32':
-                    creationflags = subprocess.CREATE_NO_WINDOW
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding='utf-8',
-                    errors='replace',
-                    creationflags=creationflags
-                )
-                stdout, stderr = process.communicate(timeout=120)
-                output = stdout + stderr
-                if process.returncode == 0:
-                    self.append_log(f"<span style='color:green;'>安装成功: {filename}</span>")
-                else:
-                    self.append_log(f"<span style='color:red;'>安装失败: {filename}</span>")
-                    friendly_msg = self.parse_install_error(output)
-                    if friendly_msg:
-                        self.append_log(f"<span style='color:#A6402F; font-weight:bold;'>⚠️ 原因：{friendly_msg}</span>")
-            except subprocess.TimeoutExpired:
+    def _install_apk(self, current_device, file_path, filename):
+        """在后台线程中执行 adb install，失败时把安装器返回码翻译成人话"""
+        process = None
+        try:
+            cmd = AdbClient(serial=current_device).command(
+                ["install", "-r", "-t", "-d", "-g", file_path])
+            self.append_log(f"<span style='color:blue;'>开始安装: {filename} 到设备 {current_device}</span>")
+            creationflags = 0
+            if sys.platform == 'win32':
+                creationflags = subprocess.CREATE_NO_WINDOW
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                creationflags=creationflags
+            )
+            stdout, stderr = process.communicate(timeout=120)
+            output = stdout + stderr
+            if process.returncode == 0:
+                self.append_log(f"<span style='color:green;'>安装成功: {filename}</span>")
+            else:
+                self.append_log(f"<span style='color:red;'>安装失败: {filename}</span>")
+                friendly_msg = self.parse_install_error(output)
+                if friendly_msg:
+                    self.append_log(f"<span style='color:#A6402F; font-weight:bold;'>⚠️ 原因：{friendly_msg}</span>")
+                logger.warning("安装失败 %s: returncode=%s output=%s",
+                               filename, process.returncode, output.strip()[-500:])
+        except subprocess.TimeoutExpired:
+            if process is not None:
                 process.kill()
-                self.append_log(f"<span style='color:red;'>安装超时（120秒），已终止</span>")
-            except Exception as e:
-                self.append_log(f"<span style='color:red;'>安装异常: {str(e)}</span>")
-
-        threading.Thread(target=install_worker, daemon=True).start()
+            logger.warning("安装超时 120s，已终止: %s", filename)
+            self.append_log(f"<span style='color:red;'>安装超时（120秒），已终止</span>")
+        except Exception as e:
+            logger.error("安装异常: %s", filename, exc_info=True)
+            self.append_log(f"<span style='color:red;'>安装异常: {str(e)}</span>")
 
     @Slot ( )
     def on_help ( self ) :
