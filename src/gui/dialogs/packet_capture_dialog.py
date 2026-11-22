@@ -15,6 +15,10 @@ from src.core.adb_client import AdbClient
 from src.utils.helpers import resource_path
 from src.gui.toast import Toast
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class TcpdumpDeployThread(QThread):
     finished = Signal(bool, str)
@@ -151,8 +155,8 @@ class CaptureWorker(QThread):
         if self.process and self.process.poll() is None:
             try:
                 self.process.terminate()
-            except:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（stop）: %s", exc, exc_info=True)
 
 
 class PacketCaptureDialog(QDialog):
@@ -427,8 +431,8 @@ class PacketCaptureDialog(QDialog):
             try:
                 size = os.path.getsize(self.capture_worker.capture_file)
                 self.on_size_updated(size)
-            except:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（update_file_size）: %s", exc, exc_info=True)
 
     def stop_capture(self):
         if self.capture_worker and self.capture_worker.isRunning():

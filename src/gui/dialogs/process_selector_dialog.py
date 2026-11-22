@@ -7,6 +7,10 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
 from PySide6.QtCore import Qt
 from src.core.adb_client import AdbClient
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class ProcessSelectorDialog(QDialog):
     def __init__(self, adb_manager, device_serial, parent=None):
@@ -149,8 +153,8 @@ class ProcessSelectorDialog(QDialog):
                     if result.ok and result.stdout.strip():
                         pid = result.stdout.strip().split('\n')[0]
                         return pid
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("忽略异常（get_selected_pid）: %s", exc, exc_info=True)
                 # 如果没有正在运行的进程，返回包名（让调用方处理）
                 return pkg
         return None

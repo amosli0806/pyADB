@@ -11,6 +11,10 @@ import qtawesome as qta
 from src.gui.toast import Toast
 from src.core.adb_client import AdbClient
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class WeakNetworkDialog(QDialog):
     show_info_signal = Signal(str, str)
@@ -585,8 +589,8 @@ class WeakNetworkDialog(QDialog):
         if parent is not None and hasattr(parent, 'append_log'):
             try:
                 parent.append_log(text)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（_notify_log）: %s", exc, exc_info=True)
 
     def _restore_rules_sync(self):
         """
@@ -638,8 +642,8 @@ class WeakNetworkDialog(QDialog):
                         found.append(iface)
                 if found:
                     self.residual_found.emit(found)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（_start_residual_check）: %s", exc, exc_info=True)
 
         threading.Thread(target=worker, daemon=True).start()
 

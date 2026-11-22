@@ -22,8 +22,12 @@ dist/
 Thumbs.db
 
 # Project specific
-resources/icons/  # 图标为二进制文件，通常不纳入版本控制
-config.json       # 用户配置
+# 图标为二进制文件，通常不纳入版本控制
+resources/icons/
+# 用户配置（注意：src/config.json 已被历史提交跟踪，本规则对新克隆不生效）
+config.json
+# 运行日志
+logs/
 
 # 打包与发版产物
 build_*/

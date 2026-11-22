@@ -37,6 +37,10 @@ from PySide6.QtWidgets import QMessageBox, QApplication
 
 from src.utils.version import APP_VERSION
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 # ---------- 更新源 ----------
 # 仓库："owner/repo"。留空 = 关闭检查（不联网）。
 GITHUB_REPO = "amosli0806/pyADB"
@@ -363,8 +367,8 @@ class Updater(QObject):
                     reset = e.headers.get("X-RateLimit-Reset") if e.headers else None
                     if reset:
                         when = time.strftime("%H:%M", time.localtime(int(reset)))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("忽略异常（_check_impl）: %s", exc, exc_info=True)
                 reason = f"请求过于频繁，请在 {when} 后重试" if when else "请求过于频繁，请稍后再试"
             else:
                 reason = f"GitHub HTTP {e.code}"
@@ -406,8 +410,8 @@ class Updater(QObject):
             if path and os.path.exists(path):
                 try:
                     os.remove(path)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("忽略异常（_cleanup_temp_file）: %s", exc, exc_info=True)
         self._part_file = None
         self._temp_file = None
 
@@ -559,8 +563,8 @@ class Updater(QObject):
         try:
             subprocess.run([adb, "kill-server"], capture_output=True, timeout=8,
                            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("忽略异常（_stop_background_processes）: %s", exc, exc_info=True)
 
     def _extract_package(self, zip_path: str, install_dir: str) -> str:
         """

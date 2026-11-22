@@ -14,6 +14,10 @@ import qtawesome as qta
 from src.gui.toast import Toast
 from src.core.adb_client import AdbClient
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class AnrAnalyzerDialog(QDialog):
     # 定义信号用于跨线程更新 UI
@@ -221,8 +225,8 @@ class AnrAnalyzerDialog(QDialog):
                     # 无论成功失败都清理临时文件，避免残留
                     try:
                         os.remove(local_path)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("忽略异常（pull_and_analyze）: %s", exc, exc_info=True)
                 parsed = self._parse_anr(content)
                 self.result_signal.emit(parsed)
             except Exception as e:

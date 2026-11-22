@@ -22,6 +22,10 @@ import qtawesome as qta
 from src.core.adb_client import AdbClient
 from src.utils.helpers import resource_path, get_timestamp
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class ScreenMirrorDialog(QDialog):
     """投屏设置与交互对话框（非模态）"""
@@ -77,8 +81,8 @@ class ScreenMirrorDialog(QDialog):
                     self.check_timer.start()
                     self._update_ui_state()
                     return
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("忽略异常（_detect_existing_scrcpy）: %s", exc, exc_info=True)
 
     # ---------- UI 布局 ----------
     def setup_ui(self):
@@ -296,8 +300,8 @@ class ScreenMirrorDialog(QDialog):
             result2 = self.adb.shell(f"ps | grep {pid}", timeout=3)
             if result2.ok and str(pid) in result2.stdout:
                 return True
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("忽略异常（_is_pid_running）: %s", exc, exc_info=True)
         return False
 
     def start_mirror(self):
@@ -311,8 +315,8 @@ class ScreenMirrorDialog(QDialog):
             except:
                 try:
                     self.scrcpy_process.kill()
-                except:
-                    pass
+                except Exception as exc:
+                    logger.debug("忽略异常（start_mirror）: %s", exc, exc_info=True)
             self.scrcpy_process = None
         self.scrcpy_pid = None
 
@@ -470,8 +474,8 @@ class ScreenMirrorDialog(QDialog):
             except Exception:
                 try:
                     self.record_process.kill()
-                except:
-                    pass
+                except Exception as exc:
+                    logger.debug("忽略异常（stop_record）: %s", exc, exc_info=True)
 
             self.is_recording = False
             self.is_record_stopping = False
@@ -548,8 +552,8 @@ class ScreenMirrorDialog(QDialog):
             except Exception:
                 try:
                     proc.kill()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("忽略异常（_terminate_scrcpy）: %s", exc, exc_info=True)
 
         self.scrcpy_process = None
         self.scrcpy_pid = None
@@ -567,8 +571,8 @@ class ScreenMirrorDialog(QDialog):
         try:
             if self.is_recording and not self.is_record_stopping:
                 self.stop_record()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("忽略异常（force_close）: %s", exc, exc_info=True)
         self._wait_record_finished()
         self._terminate_scrcpy()
         self.close()

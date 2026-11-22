@@ -20,6 +20,10 @@ from src.utils.helpers import resource_path
 from src.utils.memory_analyzer import parse_memory_data, _generate_chart, _export_to_excel
 from src.gui.toast import Toast
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class MemoryMonitorDialog(QDialog):
     log_signal = Signal(str)
@@ -125,8 +129,8 @@ class MemoryMonitorDialog(QDialog):
             # 设置可执行权限（Windows 下忽略）
             try:
                 os.chmod(local_script, 0o755)
-            except:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（ensure_environment）: %s", exc, exc_info=True)
             self.log_signal.emit("✅ 已自动创建默认脚本")
 
         # 2. 在设备上创建工作目录

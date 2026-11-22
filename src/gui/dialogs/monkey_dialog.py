@@ -17,6 +17,10 @@ import qtawesome as qta
 from src.gui.toast import Toast
 from src.core.adb_client import AdbClient
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class MonkeyDialog(QDialog):
     def __init__(self, adb_manager, device_serial, parent=None):
@@ -302,8 +306,8 @@ class MonkeyDialog(QDialog):
             return
         try:
             self._run_adb_cmd(["shell", "rm", "-f", remote], timeout=5)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("忽略异常（_remove_whitelist_file）: %s", exc, exc_info=True)
 
     def choose_packages(self):
         """弹出应用选择对话框，让用户选择多个应用，支持搜索"""
@@ -403,8 +407,8 @@ class MonkeyDialog(QDialog):
                 self.status.setText(f"Monkey 正在运行中 (PID: {pid})")
                 self.start_monitor_thread()
                 return
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("忽略异常（check_running_monkey）: %s", exc, exc_info=True)
         self.monkey_running = False
         self.monkey_pid = None
         self._set_start_button_state(True)   # 启用开始
@@ -425,8 +429,8 @@ class MonkeyDialog(QDialog):
                         result = self._run_adb_cmd(cmd, timeout=3)
                         if result.strip():
                             self.monkey_pid = result.strip().split('\n')[0]
-                    except:
-                        pass
+                    except Exception as exc:
+                        logger.debug("忽略异常（start_monitor_thread）: %s", exc, exc_info=True)
                     time.sleep(0.5)
                     continue
 
@@ -441,8 +445,8 @@ class MonkeyDialog(QDialog):
                         self._set_stop_button_state(False)
                         self.status.setText("Monkey 已开启")
                         break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("忽略异常（start_monitor_thread）: %s", exc, exc_info=True)
                 threading.Event().wait(2)
 
         self.monitor_thread = threading.Thread(target=monitor, daemon=True)
@@ -617,8 +621,8 @@ class MonkeyDialog(QDialog):
                 return
             try:
                 self.stop_monkey()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（closeEvent）: %s", exc, exc_info=True)
 
         self.monkey_running = False
 
@@ -631,8 +635,8 @@ class MonkeyDialog(QDialog):
             except Exception:
                 try:
                     proc.kill()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("忽略异常（closeEvent）: %s", exc, exc_info=True)
         self.process = None
 
         event.accept()

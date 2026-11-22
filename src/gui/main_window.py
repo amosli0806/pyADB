@@ -36,6 +36,10 @@ from src.core.updater import Updater
 from src.utils.version import APP_VERSION
 from src.gui.toast import Toast
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class FlowLayout(QHBoxLayout):
     """流式布局，子控件超出宽度时自动换行"""
@@ -460,8 +464,8 @@ class MainWindow(QMainWindow):
             for sc in self._shortcuts:
                 try:
                     sc.activated.disconnect()
-                except:
-                    pass
+                except Exception as exc:
+                    logger.debug("忽略异常（apply_shortcuts）: %s", exc, exc_info=True)
                 sc.deleteLater()
         self._shortcuts = []
 
@@ -500,8 +504,8 @@ class MainWindow(QMainWindow):
                     sc = QShortcut(QKeySequence(ks_str), self)
                     sc.activated.connect(slot)
                     self._shortcuts.append(sc)
-                except:
-                    pass
+                except Exception as exc:
+                    logger.debug("忽略异常（apply_shortcuts）: %s", exc, exc_info=True)
 
     # -------------------- 更新相关 --------------------
 
@@ -528,8 +532,8 @@ class MainWindow(QMainWindow):
         if updater is not None:
             try:
                 updater.setParent(None)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（_release_updater）: %s", exc, exc_info=True)
 
     def _on_update_check_result(self, has_update, msg, update_info):
         if has_update and update_info is not None:
@@ -562,13 +566,13 @@ class MainWindow(QMainWindow):
             for sig, slot in ((self.updater.download_progress, on_progress),):
                 try:
                     sig.disconnect(slot)
-                except (RuntimeError, TypeError):
-                    pass
+                except (RuntimeError, TypeError) as exc:
+                    logger.debug("忽略异常（_start_download）: %s", exc, exc_info=True)
             # 先断开 canceled：关闭窗口本身也会触发取消逻辑
             try:
                 progress.canceled.disconnect()
-            except (RuntimeError, TypeError):
-                pass
+            except (RuntimeError, TypeError) as exc:
+                logger.debug("忽略异常（_start_download）: %s", exc, exc_info=True)
 
             if success:
                 progress.set_stage("正在校验并准备安装…")
@@ -793,8 +797,8 @@ class MainWindow(QMainWindow):
                 if self._mirror_dialog is not None:
                     self._mirror_dialog.close()
                     self._mirror_dialog.deleteLater()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（on_scrcpy）: %s", exc, exc_info=True)
             self._mirror_dialog = None
 
         device_model = "Android 设备"
@@ -1513,8 +1517,8 @@ class MainWindow(QMainWindow):
         if timer is not None:
             try:
                 timer.stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（_shutdown_children）: %s", exc, exc_info=True)
 
         # 2. 关闭投屏对话框（内部会终止 scrcpy / 录制进程并停掉状态定时器）
         dlg = getattr(self, '_mirror_dialog', None)
@@ -1524,8 +1528,8 @@ class MainWindow(QMainWindow):
             except Exception:
                 try:
                     dlg.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("忽略异常（_shutdown_children）: %s", exc, exc_info=True)
             self._mirror_dialog = None
 
         # 3. 中断未完成的更新下载
@@ -1533,28 +1537,28 @@ class MainWindow(QMainWindow):
         if updater is not None:
             try:
                 updater.cancel_download()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（_shutdown_children）: %s", exc, exc_info=True)
 
         # 4. 停止所有 ADB 命令并等待线程池收尾
         #    QThreadPool 在解释器退出时会等待所有运行中的任务，logcat 这类
         #    无限命令会让进程永远退不出去；子进程 adb.exe 也会变成孤儿进程
         try:
             self.adb_manager.stop_all(5000)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("忽略异常（_shutdown_children）: %s", exc, exc_info=True)
 
     def closeEvent(self, event):
         try:
             self._shutdown_children()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("忽略异常（closeEvent）: %s", exc, exc_info=True)
 
         tray = getattr(self, 'tray', None)
         if tray is not None:
             try:
                 tray.hide()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（closeEvent）: %s", exc, exc_info=True)
 
         event.accept()

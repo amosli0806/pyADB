@@ -9,6 +9,10 @@ from openpyxl import Workbook
 from pyecharts.charts import Line
 from pyecharts import options as opts
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 # 默认配置
 DEFAULT_CHART_COLORS = [
@@ -94,8 +98,8 @@ def _parse_memory_line(line: str, data: Dict[str, List]):
             data["graphics"].append(int(parts[1]))
         elif "System" in line:
             data["system"].append(int(parts[1]))
-    except (IndexError, ValueError):
-        pass  # 忽略解析错误
+    except (IndexError, ValueError) as exc:
+        logger.debug("忽略异常（_parse_memory_line）: %s", exc, exc_info=True)
 
 
 def generate_report(data: Dict[str, List], output_dir: str, car_model: str) -> tuple:

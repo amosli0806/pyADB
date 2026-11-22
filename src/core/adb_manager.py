@@ -20,6 +20,10 @@ from src.core.adb_client import AdbClient
 from src.utils.helpers import get_timestamp, resource_path
 from src.utils.constants import MAX_CONCURRENT_TASKS, MAX_OUTPUT_BUFFER_LINES
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class CommandSignals(QObject):
     """命令执行过程中的信号类"""
@@ -188,24 +192,24 @@ class AdbCommandRunnable(QRunnable):
                     capture_output=True, timeout=5,
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（_kill_process_tree）: %s", exc, exc_info=True)
 
         try:
             proc.terminate()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("忽略异常（_kill_process_tree）: %s", exc, exc_info=True)
         try:
             proc.wait(timeout=timeout)
         except Exception:
             try:
                 proc.kill()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（_kill_process_tree）: %s", exc, exc_info=True)
             try:
                 proc.wait(timeout=1)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（_kill_process_tree）: %s", exc, exc_info=True)
 
     def stop(self):
         if self._stopped:
@@ -219,8 +223,8 @@ class AdbCommandRunnable(QRunnable):
         if self.output_file:
             try:
                 self.output_file.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（stop）: %s", exc, exc_info=True)
             self.output_file = None
 
         self._kill_process_tree(self.process)
@@ -804,8 +808,8 @@ class AdbManager(QObject):
         for runnable in list(self.running_commands.values()):
             try:
                 runnable.stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("忽略异常（stop_all）: %s", exc, exc_info=True)
 
         # 再等待线程池真正空闲，避免退出时线程仍在操作已销毁的对象
         try:

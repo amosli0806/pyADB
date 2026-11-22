@@ -21,11 +21,26 @@ from src.utils.helpers import resource_path
 # 从工具模块导入 resource_path 函数。这个函数的作用是获取资源文件的绝对路径，
 # 在开发环境和打包成可执行文件后都能正确找到文件（例如样式表、图标等）。
 
+from src.utils.logger import setup_logging, install_excepthook
+# 日志：越早初始化越好，这样启动阶段的异常也能落盘
+
+logger = None   # 在 main() 内初始化，避免导入期就建文件
+
+
 def main():
     """
     应用程序的主函数，负责初始化 Qt 应用、加载样式表、创建并显示主窗口，
     最后启动事件循环。
     """
+    global logger
+    setup_logging()
+    install_excepthook()
+    from src.utils.logger import get_logger
+    logger = get_logger(__name__)
+
+    from src.utils.version import APP_VERSION
+    logger.info("===== pyADB %s 启动，Python %s =====", APP_VERSION, sys.version.split()[0])
+
     # 创建 QApplication 实例，所有 Qt 应用必须首先创建它。
     # sys.argv 允许 Qt 处理命令行参数（例如一些 Qt 特定的参数）。
     app = QApplication(sys.argv)
@@ -73,8 +88,8 @@ def main():
                 qss = f.read().replace("{ASSETS}", assets_dir)
             app.setStyleSheet(qss)
         except Exception as e:
-            # 如果加载失败，打印错误信息。在实际项目中可能会改用日志记录。
-            print(f"加载样式表失败: {e}")  # 可改为日志或忽略
+            # 样式表坏了不该阻止程序启动，但要留下现场
+            logger.error("加载样式表失败: %s", e, exc_info=True)
 
         from src.gui.main_window import MainWindow
         window = MainWindow()
@@ -86,6 +101,7 @@ def main():
         window.show()
 
         splash.set_stage("就绪", 1.0)
+        logger.info("主界面就绪，耗时 %.0f ms", (time.monotonic() - started) * 1000)
         # 至少停留 650ms：太快一闪而过反而像闪屏 bug
         remain = max(0, 650 - int((time.monotonic() - started) * 1000))
         QTimer.singleShot(remain + 140, splash.finish)
@@ -97,7 +113,9 @@ def main():
     # 启动 Qt 事件循环，并等待应用程序退出。
     # app.exec() 会进入事件循环（处理用户输入、重绘等），直到调用 quit() 或关闭窗口。
     # sys.exit() 确保程序以正确的退出码退出，并将 exec() 的返回值传递给操作系统。
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    logger.info("===== 退出，code=%s =====", exit_code)
+    sys.exit(exit_code)
 
 # 当此脚本被直接运行时（而不是作为模块被导入），执行 main() 函数。
 if __name__ == "__main__":

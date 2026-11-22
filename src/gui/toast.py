@@ -14,6 +14,10 @@ from PySide6.QtCore import (
 )
 from PySide6.QtWidgets import QLabel, QGraphicsOpacityEffect, QWidget, QDialog
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class Toast(QLabel):
     """浮在父窗口底部的短提示，同一时刻只存在一个。"""
@@ -70,8 +74,8 @@ class Toast(QLabel):
         if old is not None:
             try:
                 old._dismiss_now()
-            except RuntimeError:
-                pass
+            except RuntimeError as exc:
+                logger.debug("忽略异常（show_message）: %s", exc, exc_info=True)
 
         toast = cls(parent, text, duration)
         Toast._current = toast
