@@ -38,7 +38,9 @@ class SplashWindow(QWidget):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.resize(CARD_W, CARD_H)
-        self.setWindowOpacity(0.0)
+        # 起始透明度必须接近不透明：show() 之后主窗口的构造会阻塞事件循环，
+        # 淡入动画推不动，若从 0 起就是“一直看不见，等加载完才冒出来”。
+        self.setWindowOpacity(0.86)
 
         self._closing = False
         self._build_ui()
@@ -65,11 +67,13 @@ class SplashWindow(QWidget):
         text_col.setSpacing(6)
 
         name = QLabel("捕 虫 师")
-        name.setStyleSheet(f"color:{INK.name()}; font-size:24px; font-weight:700; letter-spacing:2px;")
+        name.setStyleSheet(
+            f"background:transparent; color:{INK.name()}; font-size:24px; font-weight:700; letter-spacing:2px;")
         text_col.addWidget(name)
 
         self.sub = QLabel(f"Android 调试工具箱  ·  V{APP_VERSION}")
-        self.sub.setStyleSheet(f"color:{MUTED.name()}; font-size:11px; letter-spacing:.4px;")
+        self.sub.setStyleSheet(
+            f"background:transparent; color:{MUTED.name()}; font-size:11px; letter-spacing:.4px;")
         text_col.addWidget(self.sub)
         text_col.addStretch()
 
@@ -78,7 +82,7 @@ class SplashWindow(QWidget):
         layout.addStretch()          # 中间留白：文案和进度条压到底部，视觉重心才不会飘在上半截
 
         self.stage = QLabel("正在启动…")
-        self.stage.setStyleSheet(f"color:{MUTED.name()}; font-size:11px;")
+        self.stage.setStyleSheet(f"background:transparent; color:{MUTED.name()}; font-size:11px;")
         layout.addWidget(self.stage)
         layout.addSpacing(8)
 
@@ -91,6 +95,11 @@ class SplashWindow(QWidget):
         layout.addWidget(self.bar)
 
         self.setStyleSheet("""
+            /* 封面卡片是 paintEvent 自己画的圆角底，内部标签必须透明，
+               否则会露出全局 QWidget 的 #F6F4F0 灰块 */
+            QLabel {
+                background: transparent;
+            }
             QProgressBar#splashBar {
                 background-color: #EFEDE7;
                 border: none;
@@ -130,8 +139,8 @@ class SplashWindow(QWidget):
 
     def fade_in(self):
         self._anim = QPropertyAnimation(self, b"windowOpacity", self)
-        self._anim.setDuration(220)
-        self._anim.setStartValue(0.0)
+        self._anim.setDuration(200)
+        self._anim.setStartValue(self.windowOpacity())   # 从当前值起步，不从 0 开始
         self._anim.setEndValue(1.0)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self._anim.start()
