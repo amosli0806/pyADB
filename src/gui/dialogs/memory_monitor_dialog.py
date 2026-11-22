@@ -29,6 +29,8 @@ class MemoryMonitorDialog(QDialog):
     log_signal = Signal(str)
     # 可见, range_lo（-1 表示不改范围）, range_hi
     progress_state = Signal(bool, int, int)
+    # 设备端监控是否在跑：后台线程探测/启停后统一发这个信号回到 GUI 线程改按钮
+    monitor_state = Signal(bool)
 
     REMOTE_WORK_DIR = "/data/local/tmp/dumpmeminfo"
     REMOTE_SCRIPT_PATH = f"{REMOTE_WORK_DIR}/dump.sh"
@@ -41,6 +43,8 @@ class MemoryMonitorDialog(QDialog):
         self.adb = AdbClient(serial=device_serial)
         self.output_dir = output_dir
         self.local_data_file = None
+        # 设备端 dump.sh 是否在跑。打开对话框时会异步探测一次（可能上次会话残留），
+        # 之后由 monitor_state 信号维护；closeEvent 据此决定要不要拦一下。
         self.monitoring = False
 
         self.setWindowTitle("内存监控")
@@ -48,6 +52,24 @@ class MemoryMonitorDialog(QDialog):
         self.setup_ui()
         self.log_signal.connect(self.append_log)
         self.progress_state.connect(self._apply_progress_state)
+        self.monitor_state.connect(self._apply_monitor_state)
+        self._probe_monitor_state()
+
+    def _apply_monitor_state(self, running):
+        """按设备端状态切换「启动/停止」按钮，避免重复启动或空点停止"""
+        self.monitoring = running
+        self.start_btn.setEnabled(not running)
+        self.stop_btn.setEnabled(running)
+
+    def _probe_monitor_state(self):
+        """打开对话框时探一次：上次会话可能把 dump.sh 留在设备后台"""
+        def worker():
+            try:
+                self.monitor_state.emit(self._check_monitor_running())
+            except Exception as exc:
+                logger.debug("忽略异常（_probe_monitor_state）: %s", exc, exc_info=True)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _apply_progress_state(self, visible, lo, hi):
         """进度条只能在主线程改：后台线程统一通过 progress_state 转投"""
@@ -61,7 +83,7 @@ class MemoryMonitorDialog(QDialog):
         info = QLabel(
             "功能说明：\n"
             "1. 启动监控后，设备后台每30秒记录一次 com.baidu.naviauto 的内存信息。\n"
-            "2. 停止监控后，可拉取数据文件到本地。\n"
+            "2. 点「停止监控」才会真正停掉设备端循环，之后可「拉取数据」到本地。\n"
             "3. 生成报告将解析数据并生成 HTML 图表和 Excel 文件。\n"
             "⚠️ 需要 root 权限，脚本存放于 /data/local/tmp/"
         )
@@ -79,14 +101,20 @@ class MemoryMonitorDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         self.start_btn = QPushButton("启动监控")
+        self.stop_btn = QPushButton("停止监控")
         self.pull_btn = QPushButton("拉取数据")
         self.report_btn = QPushButton("生成报告")
 
         self.start_btn.clicked.connect(self.start_monitor)
+        self.stop_btn.clicked.connect(self.stop_monitor)
         self.pull_btn.clicked.connect(self.pull_data)
         self.report_btn.clicked.connect(self.generate_report)
 
+        # 探测结果回来之前先按「未在运行」处理，探测到残留会立刻翻过来
+        self.stop_btn.setEnabled(False)
+
         btn_layout.addWidget(self.start_btn)
+        btn_layout.addWidget(self.stop_btn)
         btn_layout.addWidget(self.pull_btn)
         btn_layout.addWidget(self.report_btn)
         layout.addLayout(btn_layout)
@@ -198,15 +226,20 @@ class MemoryMonitorDialog(QDialog):
         return len(self._get_monitor_pids()) > 0
 
     def start_monitor(self):
+        # 环境准备 + 启进程要好几秒，期间先禁掉按钮，避免连点起两份监控
+        self.start_btn.setEnabled(False)
+
         def worker():
             # 先确保环境就绪（推送脚本等）
             if not self.ensure_environment():
                 self.log_signal.emit("❌ 环境准备失败，无法启动监控")
+                self.monitor_state.emit(False)
                 return
 
             # 检查是否已有监控进程
             if self._check_monitor_running():
                 self.log_signal.emit("⚠️ 监控已在运行中")
+                self.monitor_state.emit(True)
                 return
 
             self.log_signal.emit("正在启动监控...")
@@ -225,10 +258,12 @@ class MemoryMonitorDialog(QDialog):
             if self._check_monitor_running():
                 pids = self._get_monitor_pids()
                 self.log_signal.emit(f"✅ 监控已启动 (PID: {', '.join(pids)})")
+                self.monitor_state.emit(True)
                 # 启动后验证输出文件是否生成
                 threading.Thread(target=self._verify_output_file, daemon=True).start()
             else:
                 self.log_signal.emit("❌ 启动监控失败，未检测到进程")
+                self.monitor_state.emit(False)
                 # 尝试读取可能的错误输出
                 self._read_error_log(f"{self.REMOTE_WORK_DIR}/error.log")
                 # 可选：直接手动测试后台启动是否可行
@@ -287,10 +322,13 @@ class MemoryMonitorDialog(QDialog):
         self._test_script_directly()
 
     def stop_monitor(self):
+        self.stop_btn.setEnabled(False)
+
         def worker():
             pids = self._get_monitor_pids()
             if not pids:
                 self.log_signal.emit("⚠️ 没有运行中的监控任务。")
+                self.monitor_state.emit(False)
                 return
 
             self.log_signal.emit(f"正在终止进程: {', '.join(pids)}")
@@ -306,19 +344,67 @@ class MemoryMonitorDialog(QDialog):
                     time.sleep(1)
                     if self._check_monitor_running():
                         self.log_signal.emit(f"❌ 仍有进程残留: {self._get_monitor_pids()}")
+                        self.monitor_state.emit(True)
                     else:
                         self.log_signal.emit("✅ 监控已停止（强制终止）。")
+                        self.monitor_state.emit(False)
                 else:
                     self.log_signal.emit("✅ 监控已停止。")
+                    self.monitor_state.emit(False)
             else:
                 self.log_signal.emit("⚠️ pkill 失败，尝试 killall...")
                 rc, _, _ = self._run_adb(["shell", "killall dump.sh"], timeout=10)
                 if rc == 0:
                     self.log_signal.emit("✅ 监控已停止（killall）。")
+                    self.monitor_state.emit(False)
                 else:
                     self.log_signal.emit("❌ 无法停止监控进程，请手动执行 adb shell pkill -f dump.sh")
+                    self.monitor_state.emit(True)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _stop_monitor_blocking(self):
+        """关闭窗口时用：同步把设备端循环停掉，返回是否已停。
+
+        这里必须同步：closeEvent 返回后对话框就被销毁，异步线程再回头
+        碰 self 会报 RuntimeError，而设备侧的 dump.sh 还在每 30 秒写一次。
+        单次 pkill 通常几十毫秒，最坏两条命令各 8 秒超时。
+        """
+        self._run_adb(["shell", "pkill -f 'sh dump.sh'"], timeout=8)
+        remaining = self._get_monitor_pids()
+        for pid in remaining:
+            self._run_adb(["shell", f"kill -9 {pid}"], timeout=5)
+
+        running = self._check_monitor_running()
+        self.monitoring = running
+        return not running
+
+    def closeEvent(self, event):
+        """监控还在跑就别静默关窗：脚本会在设备上每 30 秒写一次 output.txt"""
+        if not self.monitoring:
+            event.accept()
+            return
+
+        reply = QMessageBox.question(
+            self, "确认",
+            "内存监控仍在设备后台运行，关闭窗口不会自动停止，"
+            "脚本会继续每 30 秒记录一次内存信息。\n\n是否停止监控并关闭？",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            event.ignore()
+            return
+
+        if self._stop_monitor_blocking():
+            logger.info("关闭内存监控窗口，设备端进程已停止")
+            event.accept()
+        else:
+            QMessageBox.warning(
+                self, "未能停止",
+                "设备端进程仍在运行，可稍后在设备上执行：\n"
+                "adb shell pkill -f dump.sh"
+            )
+            event.accept()
 
     def pull_data(self):
         safe_serial = self.device_serial.replace(':', '_')
@@ -327,6 +413,8 @@ class MemoryMonitorDialog(QDialog):
         local_file = os.path.join(device_dir, "memory_output.txt")
 
         def worker():
+            if self.monitoring:
+                self.log_signal.emit("⚠️ 监控仍在运行，只拉取已写入的部分；之后新增的记录不在本次文件里。")
             self.log_signal.emit("正在拉取 output.txt ...")
             self.progress_state.emit(True, 0, 0)
 
