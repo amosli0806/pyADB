@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QSplitter, QTextEdit, QMenu, QMessageBox, QFileDialog,
     QDialog, QScrollArea, QGridLayout, QLabel, QProgressDialog, QSizePolicy, QFrame
 )
-from PySide6.QtCore import Qt, Slot, QTimer
+from PySide6.QtCore import Qt, Slot, QTimer, QThread, Signal
 from PySide6.QtGui import QAction, QIcon, QShortcut, QKeySequence, QTextCursor
 from src.models.command import Command
 from src.gui.device_selector import DeviceSelector
@@ -94,6 +94,9 @@ def _fix_menu_shadow(menu: QMenu):
 
 
 class MainWindow(QMainWindow):
+    # 后台线程写日志的跳板：Qt 的 AutoConnection 会把 emit 排队到主线程
+    log_signal = Signal(str)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("捕虫师")
@@ -102,6 +105,7 @@ class MainWindow(QMainWindow):
         self.adb_manager = AdbManager()
         self.command_manager = CommandManager()
 
+        self.log_signal.connect(self.append_log)
         self.adb_manager.device_list_updated.connect(self.on_device_list_updated)
         self.adb_manager.command_output.connect(self.append_log)
         self.adb_manager.command_started.connect(self.on_command_started)
@@ -846,7 +850,15 @@ class MainWindow(QMainWindow):
         为什么放在这里而不是各个调用点：日志有 30 多处来源，逐处补时间迟早会漏，
         而且格式一会儿带毫秒一会儿不带。在这里统一成 HH:MM:SS + 浅灰，
         等宽字体下整列自然对齐（设计稿里那种效果）。
+
+        线程安全：还有大量 threading.Thread 在后台跑 adb 并直接调用本方法，
+        而 Qt 不允许在非 GUI 线程操作控件（轻则绘制错乱，重则随机崩溃）。
+        这里检测到非主线程就转投 log_signal，由事件循环排回主线程执行。
         """
+        if QThread.currentThread() is not self.thread():
+            self.log_signal.emit(text)
+            return
+
         if not re.match(r"^\s*(<span[^>]*>\s*)?\d{1,2}:\d{2}:\d{2}", text):
             stamp = f"<span style='color:#9C9488;'>{time.strftime('%H:%M:%S')}</span>&nbsp;&nbsp;"
             text = stamp + text
