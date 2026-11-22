@@ -524,6 +524,9 @@ class MainWindow(QMainWindow):
             ("export_commands", self.on_export_commands),
             ("import_commands", self.on_import_commands),
             ("packet_capture", self.on_packet_capture),
+            # help_center 在 DEFAULT_SHORTCUTS 里默认是 F1，但这里之前没有对应项，
+            # 等于 F1 在设置页里配了也不生效（设置页那侧同样漏了这条）
+            ("help_center", self.on_help),
             ("about", self.on_about),
         ]
 

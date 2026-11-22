@@ -46,6 +46,7 @@ SHORTCUT_ACTIONS = [
     ("packet_capture", "网络抓包"),
     ("export_commands", "导出指令"),
     ("import_commands", "导入指令"),
+    ("help_center", "帮助中心"),
     ("about", "关于"),
 ]
 
