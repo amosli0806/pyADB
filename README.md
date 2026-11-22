@@ -53,10 +53,11 @@
 │   ├── core/                # ADB 管理器、命令管理器、无线管理
 │   ├── gui/                 # 主窗口及各对话框
 │   ├── models/              # 命令数据模型
-│   └── utils/               # 工具函数、常量、设置管理
+│   ├── utils/               # 工具函数、常量、设置管理、日志
+│   └── config.json          # 用户配置文件（运行时生成，已 gitignore）
 ├── resources/               # 图标、样式表、脚本资源
 ├── tools/                   # 存放 adb、scrcpy 等二进制工具
-├── config.json              # 用户配置文件（自动生成）
+├── logs/                    # 运行日志（运行时生成，已 gitignore）
 └── requirements.txt         # Python 依赖列表
 
 ### 📝 配置文件说明
@@ -65,7 +66,13 @@ config.json 存储用户设置，包括：
 2. 自定义命令列表
 3. 快捷键映射
 4. 命令列表显示过滤模式
-首次运行时会自动生成。
+
+文件位于 src/config.json（打包后与 exe 同级），首次修改设置时自动生成；
+不纳入版本控制，删掉即恢复默认配置。
+
+### 🧾 日志说明
+运行日志写入 logs/pyadb.log（单个 2MB 滚动，保留 3 份历史）。
+反馈问题时附上该文件，可直接看到设备连接、命令执行与异常堆栈。
 
 ### macOS 打包注意事项
 1. 资源文件：main.spec 中resources/icons/app_icon.ico图标文件改为resources/icons/app_icon.icns
