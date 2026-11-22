@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from src.core.adb_client import AdbClient
 
 from src.utils.logger import get_logger
+from src.utils.qt_bridge import ui_call
 
 logger = get_logger(__name__)
 
@@ -110,32 +111,36 @@ class ProcessSelectorDialog(QDialog):
 
                 packages.sort()
 
-                # 更新UI（在主线程）
-                # 注意：对话框可能已被销毁（用户直接关窗），此时访问任何属性都会抛 RuntimeError
-                try:
-                    if not self.isVisible():
-                        return
-                except RuntimeError:
-                    return
+                # 列表控件只能在 GUI 线程改，这里交给 ui_call 排队
+                ui_call(self, self._fill_packages, packages)
 
-                self.list.clear()
-                for pkg in packages:
-                    item = QListWidgetItem(pkg)
-                    item.setData(Qt.UserRole, pkg)
-                    self.list.addItem(item)
-
-                self.label.setText(f"共 {len(packages)} 个应用")
-
-            except RuntimeError:
-                # 对话框已销毁，线程安静退出，避免控制台刷堆栈
-                return
             except Exception as e:
-                try:
-                    self.label.setText(f"加载失败: {e}")
-                except RuntimeError:
-                    return
+                logger.error("加载应用列表失败", exc_info=True)
+                ui_call(self, self._show_load_error, str(e))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _fill_packages(self, packages):
+        """把包名列表灌进控件（GUI 线程执行）"""
+        try:
+            if not self.isVisible():
+                return
+            self.list.clear()
+            for pkg in packages:
+                item = QListWidgetItem(pkg)
+                item.setData(Qt.UserRole, pkg)
+                self.list.addItem(item)
+            self.label.setText(f"共 {len(packages)} 个应用")
+        except RuntimeError:
+            # 对话框已销毁，线程安静退出
+            return
+
+    def _show_load_error(self, message):
+        """加载失败提示（GUI 线程执行）"""
+        try:
+            self.label.setText(f"加载失败: {message}")
+        except RuntimeError:
+            return
 
     def on_selection_changed(self):
         self.btn.setEnabled(bool(self.list.selectedItems()))

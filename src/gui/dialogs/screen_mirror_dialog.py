@@ -23,6 +23,7 @@ from src.core.adb_client import AdbClient
 from src.utils.helpers import resource_path, get_timestamp
 
 from src.utils.logger import get_logger
+from src.utils.qt_bridge import ui_call
 
 logger = get_logger(__name__)
 
@@ -334,9 +335,7 @@ class ScreenMirrorDialog(QDialog):
                     try:
                         subprocess.run([scrcpy_path, "--version"], capture_output=True, timeout=5, check=True)
                     except:
-                        self.tip_label.setText("❌ 未找到 scrcpy，请将 scrcpy 放到 tools 目录或添加到 PATH")
-                        self.is_starting = False
-                        self._update_ui_state()
+                        ui_call(self, self._on_mirror_missing_scrcpy)
                         return
 
                 cmd = [scrcpy_path, "-s", self.device_serial]
@@ -385,28 +384,42 @@ class ScreenMirrorDialog(QDialog):
 
                 time.sleep(0.5)
                 if self.scrcpy_process.poll() is not None:
-                    self.tip_label.setText(f"❌ scrcpy 启动失败，返回码: {self.scrcpy_process.returncode}")
-                    self.is_starting = False
-                    self.scrcpy_process = None
-                    self.scrcpy_pid = None
-                    self._update_ui_state()
-                    self.update()
+                    returncode = self.scrcpy_process.returncode
+                    ui_call(self, self._on_mirror_start_failed,
+                            f"❌ scrcpy 启动失败，返回码: {returncode}", True)
                     return
 
-                self.is_mirroring = True
-                self.is_starting = False
-                self.check_timer.start()
-                self.tip_label.setText("✅ 投屏已启动")
-                self._update_ui_state()
-                self.update()
+                ui_call(self, self._on_mirror_started)
 
             except Exception as e:
-                self.tip_label.setText(f"❌ 启动失败: {str(e)[:80]}")
-                self.is_starting = False
-                self._update_ui_state()
-                self.update()
+                ui_call(self, self._on_mirror_start_failed, f"❌ 启动失败: {str(e)[:80]}", False)
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _on_mirror_missing_scrcpy(self):
+        """找不到 scrcpy 可执行文件（GUI 线程）"""
+        self.tip_label.setText("❌ 未找到 scrcpy，请将 scrcpy 放到 tools 目录或添加到 PATH")
+        self.is_starting = False
+        self._update_ui_state()
+
+    def _on_mirror_start_failed(self, message, clear_pid=True):
+        """投屏启动失败（GUI 线程）"""
+        self.tip_label.setText(message)
+        self.is_starting = False
+        if clear_pid:
+            self.scrcpy_process = None
+            self.scrcpy_pid = None
+        self._update_ui_state()
+        self.update()
+
+    def _on_mirror_started(self):
+        """投屏启动成功：置状态、启轮询定时器（QTimer 必须在其所属线程启动）"""
+        self.is_mirroring = True
+        self.is_starting = False
+        self.check_timer.start()
+        self.tip_label.setText("✅ 投屏已启动")
+        self._update_ui_state()
+        self.update()
 
     # ---------- 录制控制 ----------
     def toggle_record(self):
@@ -443,20 +456,28 @@ class ScreenMirrorDialog(QDialog):
                 def monitor_record():
                     self.record_process.wait()
                     if self.is_recording:
-                        self._finish_recording()
+                        ui_call(self, self._finish_recording)
 
                 threading.Thread(target=monitor_record, daemon=True).start()
-                self.tip_label.setText("⏺ 录制中...")
-                self._update_ui_state()
-                self.update()
+                ui_call(self, self._on_record_started)
 
             except Exception as e:
-                self.is_record_starting = False
-                self.tip_label.setText(f"❌ 录制启动失败: {str(e)[:80]}")
-                self._update_ui_state()
-                self.update()
+                ui_call(self, self._on_record_start_failed, str(e)[:80])
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _on_record_started(self):
+        """录制进程已拉起（GUI 线程）"""
+        self.tip_label.setText("⏺ 录制中...")
+        self._update_ui_state()
+        self.update()
+
+    def _on_record_start_failed(self, message):
+        """录制启动失败（GUI 线程）"""
+        self.is_record_starting = False
+        self.tip_label.setText(f"❌ 录制启动失败: {message}")
+        self._update_ui_state()
+        self.update()
 
     def stop_record(self):
         if not self.is_recording or self.is_record_stopping:

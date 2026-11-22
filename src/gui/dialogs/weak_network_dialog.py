@@ -12,6 +12,7 @@ from src.gui.toast import Toast
 from src.core.adb_client import AdbClient
 
 from src.utils.logger import get_logger
+from src.utils.qt_bridge import ui_call
 
 logger = get_logger(__name__)
 
@@ -464,12 +465,9 @@ class WeakNetworkDialog(QDialog):
                     error_detail = stderr or stdout or "未知错误"
                     # 应用中途失败时回滚：否则会留下半套规则，设备侧网络处于异常状态
                     self._run_tc_cmd(f"qdisc del dev {iface} root 2>/dev/null")
-                    self.status_label.setText("应用失败")
+                    ui_call(self, self.status_label.setText, "应用失败")
                     # 恢复应用按钮（带图标）
-                    self.apply_btn.setEnabled(True)
-                    self.apply_btn.setText(" 应用")
-                    self.apply_btn.setIcon(qta.icon('fa6s.play', color='white'))
-                    self._processing = False
+                    ui_call(self, self._restore_apply_button)
 
                     if not error_emitted:
                         error_emitted = True
@@ -494,17 +492,14 @@ class WeakNetworkDialog(QDialog):
             if success:
                 self._applied = True
                 self._applied_iface = iface
-                self.status_label.setText(f"规则已生效（{iface}），关闭窗口时将自动恢复")
+                ui_call(self, self.status_label.setText, f"规则已生效（{iface}），关闭窗口时将自动恢复")
                 self.show_info_signal.emit(
                     "成功",
                     f"弱网规则已在 {iface} 上生效\n关闭窗口时会自动恢复网络"
                 )
 
             # 恢复应用按钮（带图标）
-            self.apply_btn.setEnabled(True)
-            self.apply_btn.setText(" 应用")
-            self.apply_btn.setIcon(qta.icon('fa6s.play', color='white'))
-            self._processing = False
+            ui_call(self, self._restore_apply_button)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -527,15 +522,12 @@ class WeakNetworkDialog(QDialog):
         def worker():
             stdout, stderr, rc = self._run_tc_cmd(f"qdisc del dev {iface} root 2>/dev/null")
             # 恢复清除按钮（带图标）
-            self.clear_btn.setEnabled(True)
-            self.clear_btn.setText(" 清除")
-            self.clear_btn.setIcon(qta.icon('fa6s.eraser', color='#B0761F'))
-            self._processing = False
+            ui_call(self, self._restore_clear_button)
 
             if rc == 0:
                 self._applied = False
                 self._applied_iface = None
-                self.status_label.setText("规则已清除")
+                ui_call(self, self.status_label.setText, "规则已清除")
                 self.show_info_signal.emit("成功", "网络限制已清除")
                 return
 
@@ -546,13 +538,13 @@ class WeakNetworkDialog(QDialog):
             if err_msg and "No such file or directory" in err_msg:
                 self._applied = False
                 self._applied_iface = None
-                self.status_label.setText("无规则需清除")
+                ui_call(self, self.status_label.setText, "无规则需清除")
                 self.show_info_signal.emit("提示", "当前网卡无任何限制规则")
                 return
 
             # 情况2：权限不足
             if err_msg and ("Permission denied" in err_msg or "Operation not permitted" in err_msg):
-                self.status_label.setText("清除失败")
+                ui_call(self, self.status_label.setText, "清除失败")
                 self.show_critical_signal.emit(
                     "清除失败",
                     "权限不足，请确保设备已 root 并执行 'adb root' 后再试"
@@ -561,7 +553,7 @@ class WeakNetworkDialog(QDialog):
 
             # 情况3：tc 命令不存在或网卡名称错误
             if err_msg and ("not found" in err_msg.lower() or "no such" in err_msg.lower()):
-                self.status_label.setText("清除失败")
+                ui_call(self, self.status_label.setText, "清除失败")
                 self.show_critical_signal.emit(
                     "清除失败",
                     f"请检查网卡名称 '{iface}' 是否正确，或设备是否已 root 且内核支持 netem。\n\n错误信息：{err_msg}"
@@ -570,17 +562,30 @@ class WeakNetworkDialog(QDialog):
 
             # 情况4：其他未预料到的错误
             if err_msg and err_msg.strip():
-                self.status_label.setText("清除失败")
+                ui_call(self, self.status_label.setText, "清除失败")
                 self.show_critical_signal.emit("清除失败", err_msg)
             else:
                 # 完全没有错误信息
-                self.status_label.setText("清除失败")
+                ui_call(self, self.status_label.setText, "清除失败")
                 self.show_critical_signal.emit(
                     "清除失败",
                     "清除规则失败，请检查设备是否已 root 或网卡名称是否正确"
                 )
 
         threading.Thread(target=worker, daemon=True).start()
+
+    # ---------- 按钮状态恢复（只允许在 GUI 线程执行，后台线程用 ui_call 转投） ----------
+    def _restore_apply_button(self):
+        self.apply_btn.setEnabled(True)
+        self.apply_btn.setText(" 应用")
+        self.apply_btn.setIcon(qta.icon('fa6s.play', color='white'))
+        self._processing = False
+
+    def _restore_clear_button(self):
+        self.clear_btn.setEnabled(True)
+        self.clear_btn.setText(" 清除")
+        self.clear_btn.setIcon(qta.icon('fa6s.eraser', color='#B0761F'))
+        self._processing = False
 
     # ---------- 自动恢复 ----------
     def _notify_log(self, text):

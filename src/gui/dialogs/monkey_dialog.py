@@ -18,6 +18,7 @@ from src.gui.toast import Toast
 from src.core.adb_client import AdbClient
 
 from src.utils.logger import get_logger
+from src.utils.qt_bridge import ui_call
 
 logger = get_logger(__name__)
 
@@ -415,6 +416,19 @@ class MonkeyDialog(QDialog):
         self._set_stop_button_state(False)   # 禁用停止
         self.status.setText("就绪")
 
+    def _on_monkey_exited(self):
+        """Monkey 进程自然退出后的按钮恢复（GUI 线程）"""
+        self._set_start_button_state(True)
+        self._set_stop_button_state(False)
+        # 原文案是「Monkey 已开启」，与本分支（进程已消失）语义相反，按实际含义更正
+        self.status.setText("Monkey 已结束")
+
+    def _on_monkey_start_failed(self, error):
+        """Monkey 启动异常时恢复按钮（GUI 线程）"""
+        self.status.setText(f"启动失败: {error}")
+        self._set_start_button_state(True)
+        self._set_stop_button_state(False)
+
     def start_monitor_thread(self):
         """启动线程监控 Monkey 进程是否已结束"""
         if self.monitor_thread and self.monitor_thread.is_alive():
@@ -441,9 +455,7 @@ class MonkeyDialog(QDialog):
                         # 进程已退出
                         self.monkey_running = False
                         self.monkey_pid = None
-                        self._set_start_button_state(True)
-                        self._set_stop_button_state(False)
-                        self.status.setText("Monkey 已开启")
+                        ui_call(self, self._on_monkey_exited)
                         break
                 except Exception as exc:
                     logger.debug("忽略异常（start_monitor_thread）: %s", exc, exc_info=True)
@@ -559,16 +571,14 @@ class MonkeyDialog(QDialog):
                         break
                     time.sleep(0.5)
 
-                self.status.setText("Monkey 正在运行中...")
+                ui_call(self, self.status.setText, "Monkey 正在运行中...")
                 self.start_monitor_thread()
 
                 self.process.wait()
             except Exception as e:
-                self.status.setText(f"启动失败: {e}")
+                ui_call(self, self._on_monkey_start_failed, e)
                 self.monkey_running = False
                 self.monkey_pid = None
-                self._set_start_button_state(True)
-                self._set_stop_button_state(False)
             finally:
                 self.process = None
                 self._remove_whitelist_file()

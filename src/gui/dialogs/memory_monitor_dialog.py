@@ -27,6 +27,8 @@ logger = get_logger(__name__)
 
 class MemoryMonitorDialog(QDialog):
     log_signal = Signal(str)
+    # 可见, range_lo（-1 表示不改范围）, range_hi
+    progress_state = Signal(bool, int, int)
 
     REMOTE_WORK_DIR = "/data/local/tmp/dumpmeminfo"
     REMOTE_SCRIPT_PATH = f"{REMOTE_WORK_DIR}/dump.sh"
@@ -45,6 +47,13 @@ class MemoryMonitorDialog(QDialog):
         self.resize(550, 450)
         self.setup_ui()
         self.log_signal.connect(self.append_log)
+        self.progress_state.connect(self._apply_progress_state)
+
+    def _apply_progress_state(self, visible, lo, hi):
+        """进度条只能在主线程改：后台线程统一通过 progress_state 转投"""
+        self.progress.setVisible(visible)
+        if lo >= 0:
+            self.progress.setRange(lo, hi)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -319,17 +328,16 @@ class MemoryMonitorDialog(QDialog):
 
         def worker():
             self.log_signal.emit("正在拉取 output.txt ...")
-            self.progress.setVisible(True)
-            self.progress.setRange(0, 0)
+            self.progress_state.emit(True, 0, 0)
 
             rc, out, _ = self._run_adb(["shell", f"test -f {self.REMOTE_OUTPUT_PATH} && echo exists"])
             if "exists" not in out:
                 self.log_signal.emit(f"⚠️ 设备上未找到 {self.REMOTE_OUTPUT_PATH}")
-                self.progress.setVisible(False)
+                self.progress_state.emit(False, -1, -1)
                 return
 
             rc, _, err = self._run_adb(["pull", self.REMOTE_OUTPUT_PATH, local_file], timeout=30)
-            self.progress.setVisible(False)
+            self.progress_state.emit(False, -1, -1)
             if rc == 0:
                 self.local_data_file = local_file
                 self.log_signal.emit(f"✅ 数据已保存至: {local_file}")
@@ -349,8 +357,7 @@ class MemoryMonitorDialog(QDialog):
 
         def worker():
             self.log_signal.emit("正在解析数据并生成报告...")
-            self.progress.setVisible(True)
-            self.progress.setRange(0, 0)
+            self.progress_state.emit(True, 0, 0)
             try:
                 data = parse_memory_data(self.local_data_file)
                 if not data.get('timestamp'):
@@ -379,6 +386,6 @@ class MemoryMonitorDialog(QDialog):
             except Exception as e:
                 self.log_signal.emit(f"❌ 生成报告出错: {e}")
             finally:
-                self.progress.setVisible(False)
+                self.progress_state.emit(False, -1, -1)
 
         threading.Thread(target=worker, daemon=True).start()
