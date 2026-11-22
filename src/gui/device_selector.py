@@ -6,8 +6,6 @@
 可以定时刷新设备列表，并在设备变化时发射信号。
 """
 
-import subprocess
-import sys
 import re
 import threading
 
@@ -15,8 +13,8 @@ from PySide6.QtWidgets import QWidget, QHBoxLayout, QComboBox, QPushButton, QLab
 from PySide6.QtCore import Signal, Slot, QTimer, Qt
 from PySide6.QtGui import QColor
 
+from src.core.adb_client import AdbClient
 from src.core.adb_manager import AdbManager
-from src.utils.helpers import get_adb_path
 import qtawesome as qta
 
 
@@ -64,7 +62,6 @@ class DeviceSelector(QWidget):
         self.refresh_btn = QPushButton()
         self.refresh_btn.setObjectName("iconBtn")
         self.refresh_btn.setIcon(qta.icon('fa6s.rotate', color='#1F1D1A'))
-        self.refresh_btn.setToolTip("刷新设备列表")
         self.refresh_btn.setCursor(Qt.PointingHandCursor)
         self.refresh_btn.clicked.connect(self.refresh_devices)
         layout.addWidget(self.refresh_btn)
@@ -159,14 +156,8 @@ class DeviceSelector(QWidget):
 
     def _shell(self, serial, cmd):
         """只读查询，失败就返回空串（拿不到信息不影响主流程）"""
-        try:
-            kw = {"capture_output": True, "text": True, "timeout": 6, "encoding": "utf-8"}
-            if sys.platform == "win32":
-                kw["creationflags"] = subprocess.CREATE_NO_WINDOW
-            res = subprocess.run([get_adb_path(), "-s", serial, "shell"] + cmd.split(), **kw)
-            return res.stdout or ""
-        except Exception:
-            return ""
+        result = AdbClient(serial=serial).run(["shell"] + cmd.split(), timeout=6)
+        return (result.stdout or "") if result.ok else ""
 
     @Slot(str, str, str)
     def _on_device_info(self, serial, version, size_output):

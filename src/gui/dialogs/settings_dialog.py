@@ -204,7 +204,10 @@ class SettingsDialog(QDialog):
 
         for action_name, label in SHORTCUT_ACTIONS:
             edit = QKeySequenceEdit()
-            edit.setMinimumHeight(30)
+            # 高度要留够：QKeySequenceEdit 内部包着一个 QLineEdit，
+            # 全局 QSS 把它撑到 32px（18 min-height + 上下 6 padding + 2 边框），
+            # 这里若只给 30px，内部输入框会溢出父控件被裁掉，表现为下边框消失。
+            edit.setFixedHeight(34)
             edit.setMaximumWidth(260)
             self.key_edits[action_name] = edit
             form.addRow(f"{label}", edit)

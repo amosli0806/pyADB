@@ -35,6 +35,13 @@ QWidget {
     padding: 0px;
 }
 
+/* 文字控件默认透明：QWidget 那条底色会命中 QLabel，凡是没有自己声明背景的标签
+   （快捷分组名、启动封面标题、hintLabel…）都会在浅色卡片上露出一块 #F6F4F0 的灰方块。
+   带 objectName 的标签（deviceChip / presetTag / toast 等）选择器更具体，不受影响。 */
+QLabel {
+    background: transparent;
+}
+
 QMainWindow,
 QDialog {
     background-color: #F6F4F0;
@@ -368,6 +375,9 @@ QPushButton#runBtn[state="busy"] {
 
 /* ==================== 快捷工具分组标签 / 设备信息 chips ==================== */
 QLabel#quickGroupLabel {
+    /* 全局 QWidget 规则会命中 QLabel，给它套上一层 #F6F4F0 的底色，
+       叠在 #FBFAF7 的 quickPanel 上就是三块看得见的灰方块，这里显式透明 */
+    background: transparent;
     color: #9C9488;
     font-size: 11px;
     letter-spacing: 1px;
