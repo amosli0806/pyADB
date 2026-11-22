@@ -1,6 +1,4 @@
 # src/gui/dialogs/crash_log_dialog.py
-import subprocess
-import sys
 import threading
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QTextEdit,
                                QPushButton, QHBoxLayout, QApplication,
@@ -9,6 +7,7 @@ from PySide6.QtCore import Signal, Slot, Qt
 from PySide6.QtGui import QIcon
 import qtawesome as qta
 from src.gui.toast import Toast
+from src.core.adb_client import AdbClient
 
 
 class CrashLogDialog(QDialog):
@@ -18,6 +17,7 @@ class CrashLogDialog(QDialog):
         super().__init__(parent)
         self.adb_manager = adb_manager
         self.device_serial = device_serial
+        self.adb = AdbClient(serial=device_serial)
 
         # 允许窗口最大化，并设置最小尺寸
         self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint)
@@ -57,12 +57,10 @@ class CrashLogDialog(QDialog):
     def load_logs(self):
         def worker():
             try:
-                cmd = ["adb", "-s", self.device_serial, "logcat", "-b", "crash", "-d"]
-                if sys.platform == 'win32':
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
-                                            creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8')
-                else:
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, encoding='utf-8')
+                result = self.adb.run(["logcat", "-b", "crash", "-d"], timeout=30)
+                if not result.ok:
+                    self.log_ready.emit(f"获取崩溃日志失败: {result.error}")
+                    return
                 log = result.stdout if result.stdout else "没有崩溃日志"
                 self.log_ready.emit(log)
             except Exception as e:

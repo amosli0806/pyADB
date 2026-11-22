@@ -20,9 +20,10 @@ from src.gui.command_list import CommandListWidget
 from src.gui.pulse import Pulse
 from src.gui.dialogs.wireless_dialog import WirelessDialog
 from src.gui.dialogs.custom_command_dialog import CustomCommandDialog
+from src.core.adb_client import AdbClient
 from src.core.adb_manager import AdbManager
 from src.core.command_manager import CommandManager
-from src.utils.helpers import get_timestamp, get_adb_path
+from src.utils.helpers import get_timestamp
 from src.utils.settings import Settings
 from src.gui.dialogs.search_results_dialog import SearchResultsDialog
 from PySide6.QtWidgets import QApplication
@@ -199,13 +200,28 @@ class MainWindow(QMainWindow):
         return menu
 
     def setup_ui(self):
+        """搭主界面骨架：工具栏 + 左「指令」卡片 + 右「快捷/日志」。
+
+        这里只负责组装，三块内容的细节各自成方法 —— 以前 230 行挤在一个函数里，
+        改任何一处都要滚动半天，还容易改到相邻模块。
+        """
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(12, 9, 12, 12)
         main_layout.setSpacing(10)
 
-        # ---------- 工具栏 ----------
+        # 工具栏必须最先建：里面的「执行选中」「清空」按钮会被下面两栏复用
+        self._build_toolbar()
+
+        splitter = QSplitter(Qt.Horizontal)
+        main_layout.addWidget(splitter)
+        splitter.addWidget(self._build_command_panel())
+        splitter.addWidget(self._build_right_panel())
+        splitter.setSizes([430, 630])
+
+    # ---------- 工具栏 ----------
+    def _build_toolbar(self):
         toolbar = QToolBar()
         toolbar.setMovable(False)      # 禁止拖动工具栏
         toolbar.setFloatable(False)    # 禁止拖出成浮动窗口
@@ -272,10 +288,8 @@ class MainWindow(QMainWindow):
         self.clear_log_btn.setProperty("compact", "true")   # 26px 高，和「执行选中」同档
         self.clear_log_btn.clicked.connect(self.on_clear_log)
 
-        # ---------- 主分割器 ----------
-        splitter = QSplitter(Qt.Horizontal)
-        main_layout.addWidget(splitter)
-
+    # ---------- 左侧：指令卡片 ----------
+    def _build_command_panel(self):
         # 左侧：整块做成一张卡片（标题行 + 列表共用同一个边框），参考虫师的 LeftGroup
         left_widget = QFrame()
         left_widget.setObjectName("leftGroup")
@@ -303,14 +317,25 @@ class MainWindow(QMainWindow):
         self.command_list = CommandListWidget(self.command_manager)
         left_layout.addWidget(self.command_list)
 
-        splitter.addWidget(left_widget)
+        return left_widget
 
-        # 右侧：快捷功能栏 + 日志输出
+    # ---------- 右侧：快捷栏 + 日志 ----------
+    def _build_right_panel(self):
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 1, 0)
+        right_layout.setSpacing(8)
 
+        right_layout.addWidget(self._build_quick_panel())
+        right_layout.addWidget(self._build_log_panel(), 1)
+        return right_widget
+
+    def _build_quick_panel(self):
         # ---------- 快捷功能栏：分组定义见下方 groups ----------
+        panel = QWidget()
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)   # 容器本身不留白，边框由下面的 scroll_area 画
+        panel_layout.setSpacing(8)
 
         # 创建容器和网格布局
         quick_widget = QWidget()
@@ -399,10 +424,11 @@ class MainWindow(QMainWindow):
         head_row.addWidget(self.search_edit, 1)   # 占满整行，只在右侧给「查找」留位置
         head_row.addWidget(self.search_btn)
 
-        right_layout.setSpacing(8)
-        right_layout.addLayout(head_row)
-        right_layout.addWidget(scroll_area)
+        panel_layout.addLayout(head_row)
+        panel_layout.addWidget(scroll_area)
+        return panel
 
+    def _build_log_panel(self):
         # ---- 运行日志：文案与清空按钮放进输出框顶部（同一张卡片，不再单独占一行） ----
         log_card = QFrame()
         log_card.setObjectName("logGroup")
@@ -426,10 +452,7 @@ class MainWindow(QMainWindow):
         self.log_output.setLineWrapMode(QTextEdit.WidgetWidth)
         log_card_layout.addWidget(self.log_output, 1)
 
-        right_layout.addWidget(log_card, 1)
-
-        splitter.addWidget(right_widget)
-        splitter.setSizes([430, 630])
+        return log_card
 
     def apply_shortcuts(self):
         """根据配置创建所有快捷键"""
@@ -775,23 +798,9 @@ class MainWindow(QMainWindow):
             self._mirror_dialog = None
 
         device_model = "Android 设备"
-        try:
-            cmd = ["adb", "-s", current_device, "shell", "getprop", "ro.product.model"]
-            if sys.platform == 'win32':
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=5,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                    encoding='utf-8', errors='replace'
-                )
-            else:
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=5,
-                    encoding='utf-8', errors='replace'
-                )
-            if result.returncode == 0 and result.stdout.strip():
-                device_model = result.stdout.strip()
-        except:
-            pass
+        result = AdbClient(serial=current_device).shell("getprop ro.product.model", timeout=5)
+        if result.ok and result.stdout.strip():
+            device_model = result.stdout.strip()
 
         from src.gui.dialogs.screen_mirror_dialog import ScreenMirrorDialog
         self._mirror_dialog = ScreenMirrorDialog(
@@ -1096,8 +1105,8 @@ class MainWindow(QMainWindow):
 
         def install_worker():
             try:
-                adb = get_adb_path()
-                cmd = [adb, "-s", current_device, "install", "-r", "-t", "-d", "-g", file_path]
+                cmd = AdbClient(serial=current_device).command(
+                    ["install", "-r", "-t", "-d", "-g", file_path])
                 self.append_log(f"<span style='color:blue;'>开始安装: {filename} 到设备 {current_device}</span>")
                 creationflags = 0
                 if sys.platform == 'win32':
@@ -1373,16 +1382,17 @@ class MainWindow(QMainWindow):
         local_path = os.path.join(device_output_dir, f"heap_{timestamp}.hprof")
         def worker():
             try:
-                cmd1 = ["adb", "-s", current_device, "shell", "am", "dumpheap", str(pid), remote_path]
+                adb = AdbClient(serial=current_device)
                 self.append_log(f"开始堆转储，PID: {pid}")
-                subprocess.run(cmd1, capture_output=True, timeout=30, check=True,
-                               creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
-                cmd2 = ["adb", "-s", current_device, "pull", remote_path, local_path]
-                subprocess.run(cmd2, capture_output=True, timeout=60, check=True,
-                               creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
-                cmd3 = ["adb", "-s", current_device, "shell", "rm", remote_path]
-                subprocess.run(cmd3, capture_output=True, timeout=5,
-                               creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                dump = adb.shell(f"am dumpheap {pid} {remote_path}", timeout=30)
+                if not dump.ok:
+                    self.append_log(f"堆转储失败: {dump.error}")
+                    return
+                pull = adb.run(["pull", remote_path, local_path], timeout=60)
+                if not pull.ok:
+                    self.append_log(f"拉取堆文件失败: {pull.error}")
+                    return
+                adb.shell(f"rm -f {remote_path}", timeout=5)
                 self.append_log(f"堆转储成功，保存至: {local_path}")
             except Exception as e:
                 self.append_log(f"堆转储失败: {str(e)}")

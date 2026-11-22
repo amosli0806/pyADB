@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 import qtawesome as qta
 from src.gui.toast import Toast
+from src.core.adb_client import AdbClient
 
 
 class MonkeyDialog(QDialog):
@@ -22,6 +23,7 @@ class MonkeyDialog(QDialog):
         super().__init__(parent)
         self.adb_manager = adb_manager
         self.device_serial = device_serial
+        self.adb = AdbClient(serial=device_serial)
         self.setWindowTitle("Monkey测试")
         self.resize(500, 630)
         self.process = None          # 当前对话框启动的 Monkey 进程
@@ -257,16 +259,13 @@ class MonkeyDialog(QDialog):
     def _set_stop_button_icon(self, enabled, override_text=None):
         self._set_stop_button_state(enabled, override_text)
 
-    def _run_adb_cmd(self, cmd, timeout=10):
-        try:
-            if sys.platform == 'win32':
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                                        creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8')
-            else:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, encoding='utf-8')
-            return result.stdout
-        except Exception:
+    def _run_adb_cmd(self, args, timeout=10):
+        """执行 adb 子命令，返回 stdout。args 不含 adb 路径与 -s 设备号。"""
+        result = self.adb.run(args, timeout=timeout)
+        if not result.ok:
+            print(f"[adb] {' '.join(result.command)}: {result.error}")
             return ""
+        return result.stdout
 
     # ---------------- 白名单文件（兼容受限 ROM） ----------------
     def _push_whitelist_file(self, pkgs) -> bool:
@@ -282,15 +281,9 @@ class MonkeyDialog(QDialog):
             with open(local, "w", encoding="utf-8", newline="\n") as f:
                 f.write("\n".join(pkgs) + "\n")
 
-            cmd = ["adb", "-s", self.device_serial, "push", local, remote]
-            if sys.platform == 'win32':
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=20,
-                                     creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8')
-            else:
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=20, encoding='utf-8')
-
+            res = self.adb.run(["push", local, remote], timeout=20)
             out = (res.stdout or "") + (res.stderr or "")
-            if res.returncode != 0 or "error" in out.lower():
+            if not res.ok or "error" in out.lower():
                 QMessageBox.warning(self, "白名单文件推送失败",
                                     f"无法把白名单文件推到设备：\n{out.strip()[:200]}\n\n可改用「-p 参数」方式启动。")
                 return False
@@ -308,18 +301,16 @@ class MonkeyDialog(QDialog):
         if not remote:
             return
         try:
-            self._run_adb_cmd(["adb", "-s", self.device_serial, "shell", "rm", "-f", remote], timeout=5)
+            self._run_adb_cmd(["shell", "rm", "-f", remote], timeout=5)
         except Exception:
             pass
 
     def choose_packages(self):
         """弹出应用选择对话框，让用户选择多个应用，支持搜索"""
-        cmd3 = ["adb", "-s", self.device_serial, "shell", "pm", "list", "packages", "-3"]
-        result3 = self._run_adb_cmd(cmd3)
+        result3 = self._run_adb_cmd(["shell", "pm", "list", "packages", "-3"])
         third_party = [line.split(':')[1].strip() for line in result3.splitlines() if line.startswith("package:")]
 
-        cmds = ["adb", "-s", self.device_serial, "shell", "pm", "list", "packages", "-s"]
-        results = self._run_adb_cmd(cmds)
+        results = self._run_adb_cmd(["shell", "pm", "list", "packages", "-s"])
         system = [line.split(':')[1].strip() for line in results.splitlines() if line.startswith("package:")]
 
         apps = system + third_party
@@ -401,7 +392,7 @@ class MonkeyDialog(QDialog):
     def check_running_monkey(self):
         """检测设备上是否有 Monkey 进程在运行"""
         try:
-            cmd = ["adb", "-s", self.device_serial, "shell", "pgrep", "monkey"]
+            cmd = ["shell", "pgrep", "monkey"]
             result = self._run_adb_cmd(cmd, timeout=5)
             if result.strip():
                 pid = result.strip().split('\n')[0]
@@ -430,7 +421,7 @@ class MonkeyDialog(QDialog):
                 # 如果 PID 未知，尝试获取
                 if not self.monkey_pid:
                     try:
-                        cmd = ["adb", "-s", self.device_serial, "shell", "pgrep", "monkey"]
+                        cmd = ["shell", "pgrep", "monkey"]
                         result = self._run_adb_cmd(cmd, timeout=3)
                         if result.strip():
                             self.monkey_pid = result.strip().split('\n')[0]
@@ -440,7 +431,7 @@ class MonkeyDialog(QDialog):
                     continue
 
                 try:
-                    cmd = ["adb", "-s", self.device_serial, "shell", "ps", "-p", str(self.monkey_pid)]
+                    cmd = ["shell", "ps", "-p", str(self.monkey_pid)]
                     result = self._run_adb_cmd(cmd, timeout=5)
                     if not re.search(rf'\b{self.monkey_pid}\b', result):
                         # 进程已退出
@@ -478,7 +469,7 @@ class MonkeyDialog(QDialog):
 
         if pkgs:
             for p in pkgs:
-                check_cmd = ["adb", "-s", self.device_serial, "shell", "pm", "list", "packages", p]
+                check_cmd = ["shell", "pm", "list", "packages", p]
                 result = self._run_adb_cmd(check_cmd, timeout=5)
                 if not result.strip():
                     Toast.notify(self, f"包名 {p} 不存在于设备上，请检查包名是否正确。")
@@ -491,8 +482,8 @@ class MonkeyDialog(QDialog):
             if not self._push_whitelist_file(pkgs):
                 return
 
-        # 构建命令
-        cmd = ["adb", "-s", self.device_serial, "shell", "monkey"]
+        # 构建命令（Monkey 是长任务，下面用 Popen 启动，这里只取完整 argv）
+        cmd = self.adb.command(["shell", "monkey"])
         if mode == "whitelist" and self._whitelist_remote:
             cmd.extend(["--pkg-whitelist-file", self._whitelist_remote])
         else:
@@ -556,7 +547,7 @@ class MonkeyDialog(QDialog):
                 # 等待进程启动并获取 PID
                 time.sleep(1)
                 # 尝试获取设备上的 Monkey PID
-                pid_cmd = ["adb", "-s", self.device_serial, "shell", "pgrep", "monkey"]
+                pid_cmd = ["shell", "pgrep", "monkey"]
                 for _ in range(5):
                     result = self._run_adb_cmd(pid_cmd, timeout=3)
                     if result.strip():
@@ -589,7 +580,7 @@ class MonkeyDialog(QDialog):
         # 优先使用已知的 PID
         if self.monkey_pid:
             try:
-                kill_cmd = ["adb", "-s", self.device_serial, "shell", "kill", "-9", str(self.monkey_pid)]
+                kill_cmd = ["shell", "kill", "-9", str(self.monkey_pid)]
                 self._run_adb_cmd(kill_cmd, timeout=5)
                 self.status.setText("已发送停止信号")
                 self.monkey_running = False
@@ -600,7 +591,7 @@ class MonkeyDialog(QDialog):
                 self.status.setText(f"停止失败: {e}")
         else:
             try:
-                kill_cmd = ["adb", "-s", self.device_serial, "shell", "pkill", "monkey"]
+                kill_cmd = ["shell", "pkill", "monkey"]
                 self._run_adb_cmd(kill_cmd, timeout=5)
                 self.status.setText("已发送停止信号")
                 self.monkey_running = False

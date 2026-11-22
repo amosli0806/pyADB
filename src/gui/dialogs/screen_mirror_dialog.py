@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QIcon
 import qtawesome as qta
+from src.core.adb_client import AdbClient
 from src.utils.helpers import resource_path, get_timestamp
 
 
@@ -31,6 +32,7 @@ class ScreenMirrorDialog(QDialog):
         super().__init__(parent)
         self.device_serial = device_serial
         self.device_model = device_model or device_serial
+        self.adb = AdbClient(serial=device_serial)
         self.output_dir = output_dir
         self.safe_serial = device_serial.replace(':', '_')
 
@@ -66,16 +68,8 @@ class ScreenMirrorDialog(QDialog):
     def _detect_existing_scrcpy(self):
         """检测设备上是否已有 scrcpy 投屏进程"""
         try:
-            cmd = ["adb", "-s", self.device_serial, "shell", "pgrep", "-f", f"scrcpy.*-s {self.device_serial}"]
-            if sys.platform == 'win32':
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=5,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-            else:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-
-            if result.returncode == 0 and result.stdout.strip():
+            result = self.adb.shell(f"pgrep -f 'scrcpy.*-s {self.device_serial}'", timeout=5)
+            if result.ok and result.stdout.strip():
                 pid_str = result.stdout.strip().split('\n')[0]
                 if pid_str.isdigit():
                     self.scrcpy_pid = int(pid_str)
@@ -295,26 +289,12 @@ class ScreenMirrorDialog(QDialog):
     def _is_pid_running(self, pid):
         """检查指定 PID 是否还在运行"""
         try:
-            cmd = ["adb", "-s", self.device_serial, "shell", "ps", "-p", str(pid)]
-            if sys.platform == 'win32':
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=3,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-            else:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-            if result.returncode == 0 and str(pid) in result.stdout:
+            result = self.adb.shell(f"ps -p {pid}", timeout=3)
+            if result.ok and str(pid) in result.stdout:
                 return True
-
-            cmd2 = ["adb", "-s", self.device_serial, "shell", "ps", "|", "grep", str(pid)]
-            if sys.platform == 'win32':
-                result2 = subprocess.run(
-                    cmd2, capture_output=True, text=True, timeout=3,
-                    creationflags=subprocess.CREATE_NO_WINDOW, shell=True
-                )
-            else:
-                result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=3, shell=True)
-            if result2.returncode == 0 and str(pid) in result2.stdout:
+            # 兜底：部分精简 ROM 的 ps 不支持 -p，退回全量列表 + grep
+            result2 = self.adb.shell(f"ps | grep {pid}", timeout=3)
+            if result2.ok and str(pid) in result2.stdout:
                 return True
         except Exception:
             pass
@@ -442,12 +422,10 @@ class ScreenMirrorDialog(QDialog):
 
         def run():
             try:
-                clean_cmd = ["adb", "-s", self.device_serial, "shell", "rm", "-f", self.record_temp_path]
-                subprocess.run(clean_cmd, capture_output=True, timeout=5,
-                               creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                self.adb.shell(f"rm -f {self.record_temp_path}", timeout=5)
 
-                record_cmd = ["adb", "-s", self.device_serial, "shell",
-                              f"screenrecord --time-limit 180 --size 1920x1080 {self.record_temp_path}"]
+                record_cmd = self.adb.command(
+                    ["shell", f"screenrecord --time-limit 180 --size 1920x1080 {self.record_temp_path}"])
                 self.record_process = subprocess.Popen(
                     record_cmd,
                     stdout=subprocess.PIPE,
@@ -508,17 +486,10 @@ class ScreenMirrorDialog(QDialog):
             os.makedirs(device_dir, exist_ok=True)
             local_path = os.path.join(device_dir, f"screenrecord_{timestamp}.mp4")
 
-            pull_cmd = ["adb", "-s", self.device_serial, "pull", self.record_temp_path, local_path]
-            pull_result = subprocess.run(
-                pull_cmd, capture_output=True, timeout=30,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            )
+            pull_result = self.adb.run(["pull", self.record_temp_path, local_path], timeout=30)
+            self.adb.shell(f"rm -f {self.record_temp_path}", timeout=5)
 
-            clean_cmd = ["adb", "-s", self.device_serial, "shell", "rm", "-f", self.record_temp_path]
-            subprocess.run(clean_cmd, capture_output=True, timeout=5,
-                           creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
-
-            if pull_result.returncode == 0 and os.path.exists(local_path):
+            if pull_result.ok and os.path.exists(local_path):
                 file_size = os.path.getsize(local_path)
                 if file_size > 1024:
                     self.record_completed = True

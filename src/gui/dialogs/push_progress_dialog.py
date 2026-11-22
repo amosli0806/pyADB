@@ -11,6 +11,7 @@ import os
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QProgressBar,
                                QPushButton, QLabel, QMessageBox)
 from PySide6.QtCore import QThread, Signal
+from src.core.adb_client import AdbClient
 
 
 class PushWorker(QThread):
@@ -39,18 +40,15 @@ class PushWorker(QThread):
                 startupinfo = None
                 creationflags = 0
 
+            adb = AdbClient(serial=self.device_serial, adb_path=self.adb_path)
             is_directory = self.remote_path.endswith('/') or os.path.isdir(self.local_path)
             if is_directory:
-                mkdir_cmd = [self.adb_path, "-s", self.device_serial, "shell", "mkdir", "-p", self.remote_path]
-                mkdir_result = subprocess.run(
-                    mkdir_cmd, capture_output=True, text=True, timeout=5,
-                    startupinfo=startupinfo, creationflags=creationflags
-                )
-                if mkdir_result.returncode != 0:
-                    self.finished.emit(False, f"无法创建远程目录 {self.remote_path}\n{mkdir_result.stderr}")
+                mkdir_result = adb.run(["shell", "mkdir", "-p", self.remote_path], timeout=5)
+                if not mkdir_result.ok:
+                    self.finished.emit(False, f"无法创建远程目录 {self.remote_path}\n{mkdir_result.error}")
                     return
 
-            cmd = [self.adb_path, "-s", self.device_serial, "push", self.local_path, self.remote_path]
+            cmd = adb.command(["push", self.local_path, self.remote_path])
             self._process = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding='utf-8', errors='replace', bufsize=1,

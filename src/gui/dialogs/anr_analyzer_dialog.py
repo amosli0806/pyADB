@@ -1,8 +1,6 @@
 # src/gui/dialogs/anr_analyzer_dialog.py
 import os
 import re
-import subprocess
-import sys
 import threading
 import zipfile
 import tempfile
@@ -14,6 +12,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtGui import QIcon
 import qtawesome as qta
 from src.gui.toast import Toast
+from src.core.adb_client import AdbClient
 
 
 class AnrAnalyzerDialog(QDialog):
@@ -26,6 +25,7 @@ class AnrAnalyzerDialog(QDialog):
         super().__init__(parent)
         self.adb_manager = adb_manager
         self.device_serial = device_serial
+        self.adb = AdbClient(serial=device_serial)
         self.setWindowTitle("ANR 日志分析")
         self.resize(700, 600)
         self.setup_ui()
@@ -168,27 +168,16 @@ class AnrAnalyzerDialog(QDialog):
         def worker():
             try:
                 # 检查设备状态
-                state_cmd = ["adb", "-s", self.device_serial, "get-state"]
-                if sys.platform == 'win32':
-                    result = subprocess.run(state_cmd, capture_output=True, text=True, timeout=3,
-                                            creationflags=subprocess.CREATE_NO_WINDOW)
-                else:
-                    result = subprocess.run(state_cmd, capture_output=True, text=True, timeout=3)
-                if result.stdout.strip() != "device":
+                state = self.adb.run(["get-state"], timeout=3)
+                if state.stdout.strip() != "device":
                     self.device_status_signal.emit("设备未连接或未授权")
                     self.device_list_signal.emit("设备未连接或未授权")
                     return
                 self.device_status_signal.emit("设备已连接")
 
                 # 列出 /data/anr/ 目录
-                ls_cmd = ["adb", "-s", self.device_serial, "shell", "ls", "-l", "/data/anr/"]
-                if sys.platform == 'win32':
-                    ls_result = subprocess.run(ls_cmd, capture_output=True, text=True, timeout=5,
-                                               creationflags=subprocess.CREATE_NO_WINDOW)
-                else:
-                    ls_result = subprocess.run(ls_cmd, capture_output=True, text=True, timeout=5)
-
-                if ls_result.returncode != 0:
+                ls_result = self.adb.shell("ls -l /data/anr/", timeout=5)
+                if not ls_result.ok:
                     self.device_list_signal.emit("无法访问 /data/anr/，可能需要 root 权限")
                 else:
                     files = ls_result.stdout.strip()
@@ -206,13 +195,8 @@ class AnrAnalyzerDialog(QDialog):
         def worker():
             try:
                 # 获取最新文件
-                ls_cmd = ["adb", "-s", self.device_serial, "shell", "ls", "-t", "/data/anr/"]
-                if sys.platform == 'win32':
-                    ls_result = subprocess.run(ls_cmd, capture_output=True, text=True, timeout=5,
-                                               creationflags=subprocess.CREATE_NO_WINDOW)
-                else:
-                    ls_result = subprocess.run(ls_cmd, capture_output=True, text=True, timeout=5)
-                if ls_result.returncode != 0:
+                ls_result = self.adb.shell("ls -t /data/anr/", timeout=5)
+                if not ls_result.ok:
                     self.result_signal.emit("无法获取 ANR 文件列表，可能需要 root 权限")
                     return
                 files = ls_result.stdout.splitlines()
@@ -225,12 +209,12 @@ class AnrAnalyzerDialog(QDialog):
                 fd, local_path = tempfile.mkstemp(suffix=".txt")
                 os.close(fd)
                 try:
-                    pull_cmd = ["adb", "-s", self.device_serial, "pull", remote_path, local_path]
-                    if sys.platform == 'win32':
-                        subprocess.run(pull_cmd, capture_output=True, timeout=30,
-                                       creationflags=subprocess.CREATE_NO_WINDOW, check=True)
-                    else:
-                        subprocess.run(pull_cmd, capture_output=True, timeout=30, check=True)
+                    pull_result = self.adb.run(["pull", remote_path, local_path], timeout=30)
+                    if not pull_result.ok:
+                        self.result_signal.emit(
+                            f"拉取失败：权限不足，请尝试执行 adb root 后重试\n"
+                            f"错误详情: {pull_result.error}")
+                        return
                     # 分析
                     content = self._read_file(local_path)
                 finally:
@@ -241,8 +225,6 @@ class AnrAnalyzerDialog(QDialog):
                         pass
                 parsed = self._parse_anr(content)
                 self.result_signal.emit(parsed)
-            except subprocess.CalledProcessError as e:
-                self.result_signal.emit(f"拉取失败: 权限不足，请尝试执行 adb root 后重试\n错误详情: {str(e)}")
             except Exception as e:
                 self.result_signal.emit(f"拉取或分析失败: {str(e)}")
 

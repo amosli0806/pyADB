@@ -1,8 +1,5 @@
 # src/gui/dialogs/weak_network_dialog.py
-import subprocess
-import sys
 import threading
-import re
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QSpinBox, QDoubleSpinBox, QPushButton, QLabel,
@@ -12,6 +9,7 @@ from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QIcon
 import qtawesome as qta
 from src.gui.toast import Toast
+from src.core.adb_client import AdbClient
 
 
 class WeakNetworkDialog(QDialog):
@@ -29,6 +27,7 @@ class WeakNetworkDialog(QDialog):
         super().__init__(parent)
         self.adb_manager = adb_manager
         self.device_serial = device_serial
+        self.adb = AdbClient(serial=device_serial)
         self.tc_path = None
         self._processing = False
         # ---- 设备能力（打开时后台探测，参考虫师的做法） ----
@@ -256,20 +255,10 @@ class WeakNetworkDialog(QDialog):
 
     # ---------- 核心功能方法 ----------
     def _run_adb_shell(self, cmd, timeout=10):
-        full_cmd = ["adb", "-s", self.device_serial, "shell"] + cmd.split()
-        try:
-            if sys.platform == 'win32':
-                result = subprocess.run(
-                    full_cmd, capture_output=True, text=True, timeout=timeout,
-                    creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8'
-                )
-            else:
-                result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=timeout, encoding='utf-8')
-            return result.stdout.strip(), result.stderr.strip(), result.returncode
-        except subprocess.TimeoutExpired:
+        result = self.adb.run(["shell"] + cmd.split(), timeout=timeout)
+        if result.timed_out:
             return "", "Timeout", -1
-        except Exception as e:
-            return "", str(e), -1
+        return result.stdout.strip(), result.stderr.strip(), result.returncode
 
     def _get_tc_path(self):
         if self.tc_path:
@@ -297,18 +286,10 @@ class WeakNetworkDialog(QDialog):
 
     def _run_adb_shell_str(self, cmd: str, timeout=10):
         """整条命令作为单个参数交给设备侧 sh，保留 su -c 里的引号结构"""
-        full_cmd = ["adb", "-s", self.device_serial, "shell", cmd]
-        try:
-            result = subprocess.run(
-                full_cmd, capture_output=True, text=True, timeout=timeout,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
-                encoding='utf-8'
-            )
-            return result.stdout.strip(), result.stderr.strip(), result.returncode
-        except subprocess.TimeoutExpired:
+        result = self.adb.shell(cmd, timeout=timeout)
+        if result.timed_out:
             return "", "Timeout", -1
-        except Exception as e:
-            return "", str(e), -1
+        return result.stdout.strip(), result.stderr.strip(), result.returncode
 
     # ---------------- 设备能力探测（root / tc / netem） ----------------
     def _find_su(self):

@@ -16,6 +16,7 @@ import re
 from PySide6.QtCore import QObject, Signal, QThreadPool, QRunnable
 import time
 
+from src.core.adb_client import AdbClient
 from src.utils.helpers import get_timestamp, resource_path
 from src.utils.constants import MAX_CONCURRENT_TASKS, MAX_OUTPUT_BUFFER_LINES
 
@@ -107,33 +108,37 @@ class AdbCommandRunnable(QRunnable):
             self.signals.error.emit(f"[{self.command.name}] 无法创建输出文件: {str(e)}")
 
     def _get_screenrecord_pid(self):
-        commands = [
-            f"adb -s {self.device_serial} shell ps -e | grep screenrecord",
-            f"adb -s {self.device_serial} shell ps -A | grep screenrecord",
-            f"adb -s {self.device_serial} shell ps | grep screenrecord",
-            f"adb -s {self.device_serial} shell pgrep screenrecord",
-            f"adb -s {self.device_serial} shell pidof screenrecord"
+        """在设备上找 screenrecord 进程 PID。
+
+        按 ROM 差异依次试 ps -e / ps -A / ps / pgrep / pidof。
+        原先这些命令是 `shell=True` 交给本机 cmd 执行，`| grep` 在 Windows 上
+        根本没有 grep 可用，前三条永远失败；现在统一走设备侧 sh。
+        """
+        probes = [
+            ("ps -e | grep screenrecord", False),
+            ("ps -A | grep screenrecord", False),
+            ("ps | grep screenrecord", False),
+            ("pgrep screenrecord", True),
+            ("pidof screenrecord", True),
         ]
-        for cmd in commands:
+        adb = AdbClient(serial=self.device_serial)
+        for cmd, pid_only in probes:
             try:
-                result = subprocess.run(
-                    cmd, shell=True, capture_output=True, text=True, timeout=5,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    output = result.stdout.strip()
-                    if "pgrep" in cmd or "pidof" in cmd:
-                        pid = output.split()[0] if output else None
-                        if pid and pid.isdigit():
-                            return pid
-                    lines = output.splitlines()
-                    for line in lines:
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            if parts[0].isdigit():
-                                return parts[0]
-                            if parts[1].isdigit():
-                                return parts[1]
+                result = adb.shell(cmd, timeout=5)
+                if not (result.ok and result.stdout.strip()):
+                    continue
+                output = result.stdout.strip()
+                if pid_only:
+                    pid = output.split()[0] if output else None
+                    if pid and pid.isdigit():
+                        return pid
+                for line in output.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        if parts[0].isdigit():
+                            return parts[0]
+                        if parts[1].isdigit():
+                            return parts[1]
             except Exception as e:
                 self.signals.error.emit(f"[{self.command.name}] 获取 PID 异常: {e}")
                 continue
@@ -144,18 +149,13 @@ class AdbCommandRunnable(QRunnable):
         if not pid:
             self.signals.error.emit(f"[{self.command.name}] 无法获取录屏进程 PID，将强制终止")
             return False
+        adb = AdbClient(serial=self.device_serial)
         try:
-            kill_cmd = f"adb -s {self.device_serial} shell kill -2 {pid}"
-            subprocess.run(kill_cmd, shell=True, timeout=3,
-                           creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+            adb.shell(f"kill -2 {pid}", timeout=3)
             for _ in range(20):
                 time.sleep(0.5)
-                check_cmd = f"adb -s {self.device_serial} shell ps -e | grep {pid}"
-                check_result = subprocess.run(
-                    check_cmd, shell=True, capture_output=True, text=True, timeout=3,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                )
-                if check_result.returncode != 0 or not check_result.stdout:
+                check_result = adb.shell(f"ps -e | grep {pid}", timeout=3)
+                if not (check_result.ok and check_result.stdout):
                     # 成功优雅退出，不再输出冗余日志
                     return True
             self.signals.error.emit(f"[{self.command.name}] 等待录屏进程退出超时，将强制终止")
@@ -238,13 +238,9 @@ class AdbCommandRunnable(QRunnable):
 
     def _clean_remote_process(self):
         try:
-            result = subprocess.run(
-                ["adb", "-s", self.device_serial, "shell", "ps", "-e", "-o", "pid,cmd"],
-                capture_output=True, text=True, timeout=5,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
-                encoding='utf-8', errors='replace'
-            )
-            if result.returncode != 0:
+            adb = AdbClient(serial=self.device_serial)
+            result = adb.shell("ps -e -o pid,cmd", timeout=5)
+            if not result.ok:
                 self.signals.error.emit(f"[清理] 获取进程列表失败: {result.stderr}")
                 return
 
@@ -262,13 +258,8 @@ class AdbCommandRunnable(QRunnable):
 
             killed_count = 0
             for pid in pids_to_kill:
-                kill_cmd = ["adb", "-s", self.device_serial, "shell", "kill", "-9", pid]
-                kill_result = subprocess.run(
-                    kill_cmd, timeout=2, capture_output=True, text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
-                    encoding='utf-8', errors='replace'
-                )
-                if kill_result.returncode == 0:
+                kill_result = adb.shell(f"kill -9 {pid}", timeout=2)
+                if kill_result.ok:
                     killed_count += 1
                 else:
                     err_msg = kill_result.stderr.strip()
@@ -325,37 +316,8 @@ class AdbCommandRunnable(QRunnable):
             self._emit_finished(success)
 
     def _run_screenrecord(self, timestamp):
-        # ---- 新增：检测是否已有录屏进程在运行 ----
-        def check_screenrecord_running():
-            try:
-                # 尝试 pgrep
-                cmd = f"adb -s {self.device_serial} shell pgrep screenrecord"
-                result = subprocess.run(
-                    cmd, shell=True, capture_output=True, text=True, timeout=3,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    return result.stdout.strip().split()[0]
-            except:
-                pass
-            try:
-                # 回退到 ps
-                cmd = f"adb -s {self.device_serial} shell ps -e | grep screenrecord"
-                result = subprocess.run(
-                    cmd, shell=True, capture_output=True, text=True, timeout=3,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    lines = result.stdout.strip().splitlines()
-                    for line in lines:
-                        parts = line.split()
-                        if len(parts) >= 2 and parts[1].isdigit():
-                            return parts[1]
-            except:
-                pass
-            return None
-
-        existing_pid = check_screenrecord_running()
+        # ---- 检测是否已有录屏进程在运行（与停止逻辑共用一套探测，避免两份实现漂移） ----
+        existing_pid = self._get_screenrecord_pid()
         if existing_pid:
             self.signals.error.emit(
                 self._format_message(
@@ -373,18 +335,19 @@ class AdbCommandRunnable(QRunnable):
             os.makedirs(local_dir, exist_ok=True)
             self._local_video_path = os.path.join(local_dir, f"video_{timestamp}.mp4")
             self._local_video_path = os.path.normpath(self._local_video_path)
-            full_cmd = f"adb -s {self.device_serial} shell screenrecord --time-limit 180 {self._device_video_path}"
+            full_cmd = AdbClient(serial=self.device_serial).command(
+                ["shell", f"screenrecord --time-limit 180 {self._device_video_path}"])
 
             if sys.platform == 'win32':
                 self.process = subprocess.Popen(
-                    full_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    full_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     text=True, bufsize=1, universal_newlines=True, encoding='utf-8',
                     errors='backslashreplace',
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
             else:
                 self.process = subprocess.Popen(
-                    full_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    full_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     text=True, bufsize=1, universal_newlines=True, encoding='utf-8',
                     errors='backslashreplace',
                     preexec_fn=os.setsid
@@ -483,24 +446,15 @@ class AdbCommandRunnable(QRunnable):
         self._video_pulled = True
         success = False
         try:
-            check_cmd = f"adb -s {self.device_serial} shell ls {device_path}"
-            result = subprocess.run(
-                check_cmd, shell=True, capture_output=True, text=True, timeout=5,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
-                encoding='utf-8', errors='replace'
-            )
-            if result.returncode != 0:
+            adb = AdbClient(serial=self.device_serial)
+            result = adb.shell(f"ls {device_path}", timeout=5)
+            if not result.ok:
                 self.signals.error.emit(self._format_message(self.LEVEL_ERROR, f"[{self.command.name}] 设备上未找到视频文件 {device_path}"))
                 success = False
                 return
 
-            pull_cmd = f"adb -s {self.device_serial} pull {device_path} \"{local_path}\""
-            pull_result = subprocess.run(
-                pull_cmd, shell=True, capture_output=True, text=True, timeout=30,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
-                encoding='utf-8', errors='replace'
-            )
-            if pull_result.returncode == 0:
+            pull_result = adb.run(["pull", device_path, local_path], timeout=30)
+            if pull_result.ok:
                 if os.path.exists(local_path):
                     file_size = os.path.getsize(local_path)
                     if file_size < 1024:
@@ -509,10 +463,7 @@ class AdbCommandRunnable(QRunnable):
                         success = False
                     else:
                         self.signals.output.emit(self._format_message(self.LEVEL_SUCCESS, f"[{self.command.name}] 视频已保存至: {local_path} ({file_size} 字节)"))
-                        del_cmd = f"adb -s {self.device_serial} shell rm {device_path}"
-                        subprocess.run(del_cmd, shell=True, timeout=5,
-                                       creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
-                                       encoding='utf-8', errors='replace')
+                        adb.shell(f"rm -f {device_path}", timeout=5)
                         success = True
                 else:
                     self.signals.error.emit(self._format_message(self.LEVEL_ERROR, f"[{self.command.name}] 拉取失败，本地文件未生成"))
@@ -801,23 +752,7 @@ class AdbManager(QObject):
     def refresh_devices(self):
         def get_devices():
             try:
-                if sys.platform == 'win32':
-                    result = subprocess.run(
-                        ["adb", "devices"], capture_output=True, text=True, timeout=5,
-                        creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8', errors='replace'
-                    )
-                else:
-                    result = subprocess.run(
-                        ["adb", "devices"], capture_output=True, text=True, timeout=5,
-                        encoding='utf-8', errors='replace'
-                    )
-                lines = result.stdout.strip().split('\n')[1:]
-                devices = []
-                for line in lines:
-                    if line.strip() and '\t' in line:
-                        serial, status = line.strip().split('\t')
-                        devices.append({'serial': serial, 'status': status})
-                return devices
+                return [{'serial': s, 'status': st} for s, st in AdbClient().devices(timeout=5)]
             except Exception:
                 return []
 

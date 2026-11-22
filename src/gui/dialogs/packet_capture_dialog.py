@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, QTimer, QThread
 from PySide6.QtGui import QIcon
 import qtawesome as qta
-from src.utils.helpers import get_adb_path, resource_path
+from src.core.adb_client import AdbClient
+from src.utils.helpers import resource_path
 from src.gui.toast import Toast
 
 
@@ -23,45 +24,35 @@ class TcpdumpDeployThread(QThread):
         self.device_serial = device_serial
 
     def run(self):
+        adb = AdbClient(serial=self.device_serial)
         # 1. 检查 root 权限
-        root_check_cmd = ["adb", "-s", self.device_serial, "shell", "id"]
-        try:
-            result = subprocess.run(
-                root_check_cmd, capture_output=True, text=True, timeout=5,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            )
-            if "uid=0" not in result.stdout:
-                self.finished.emit(False, "设备未 root，无法使用 tcpdump 抓包。请 root 设备后重试。")
-                return
-        except Exception as e:
-            self.finished.emit(False, f"检测 root 失败: {e}")
+        result = adb.shell("id", timeout=5)
+        if not result.ok:
+            self.finished.emit(False, f"检测 root 失败: {result.error}")
+            return
+        if "uid=0" not in result.stdout:
+            self.finished.emit(False, "设备未 root，无法使用 tcpdump 抓包。请 root 设备后重试。")
             return
 
-        check_cmd = ["adb", "-s", self.device_serial, "shell", "ls", "/data/local/tmp/tcpdump"]
-        try:
-            result = subprocess.run(check_cmd, capture_output=True, timeout=5,
-                                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
-            if result.returncode == 0:
-                self.finished.emit(True, "tcpdump 已就绪")
-                return
-        except:
-            pass
+        check = adb.shell("ls /data/local/tmp/tcpdump", timeout=5)
+        if check.ok:
+            self.finished.emit(True, "tcpdump 已就绪")
+            return
 
         tcpdump_local = resource_path(os.path.join("tools", "tcpdump"))
         if not os.path.exists(tcpdump_local):
             self.finished.emit(False, "未找到 tcpdump 工具，请将 tcpdump 放入 tools 目录")
             return
 
-        try:
-            push_cmd = ["adb", "-s", self.device_serial, "push", tcpdump_local, "/data/local/tmp/tcpdump"]
-            subprocess.run(push_cmd, check=True, timeout=30,
-                           creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
-            chmod_cmd = ["adb", "-s", self.device_serial, "shell", "chmod", "+x", "/data/local/tmp/tcpdump"]
-            subprocess.run(chmod_cmd, check=True, timeout=5,
-                           creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
-            self.finished.emit(True, "tcpdump 部署成功")
-        except Exception as e:
-            self.finished.emit(False, f"部署失败: {str(e)}")
+        push = adb.run(["push", tcpdump_local, "/data/local/tmp/tcpdump"], timeout=30)
+        if not push.ok:
+            self.finished.emit(False, f"部署失败: {push.error}")
+            return
+        chmod = adb.shell("chmod +x /data/local/tmp/tcpdump", timeout=5)
+        if not chmod.ok:
+            self.finished.emit(False, f"部署失败: 无法赋予执行权限（{chmod.error}）")
+            return
+        self.finished.emit(True, "tcpdump 部署成功")
 
 
 class CaptureWorker(QThread):
@@ -100,11 +91,11 @@ class CaptureWorker(QThread):
             self.finished.emit(False, "创建文件失败")
             return
 
-        adb = get_adb_path()
-        cmd = [adb, "-s", self.device_serial, "shell", "/data/local/tmp/tcpdump",
-               "-i", "any", "-s", "0", "-w", "-", "-U"]
+        adb = AdbClient(serial=self.device_serial)
+        args = ["shell", "/data/local/tmp/tcpdump", "-i", "any", "-s", "0", "-w", "-", "-U"]
         if self.filter_expr.strip():
-            cmd.extend(["-f", self.filter_expr])
+            args.extend(["-f", self.filter_expr])
+        cmd = adb.command(args)
 
         try:
             if sys.platform == 'win32':

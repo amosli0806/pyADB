@@ -1,6 +1,4 @@
 # src/gui/dialogs/device_info_dialog.py
-import subprocess
-import sys
 import threading
 import re
 from PySide6.QtWidgets import (QDialog, QVBoxLayout,
@@ -8,6 +6,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout,
 from PySide6.QtCore import Qt, Signal, Slot
 import qtawesome as qta
 from src.gui.toast import Toast
+from src.core.adb_client import AdbClient
 
 
 class DeviceInfoDialog(QDialog):
@@ -17,6 +16,8 @@ class DeviceInfoDialog(QDialog):
         super().__init__(parent)
         self.adb_manager = adb_manager
         self.device_serial = device_serial
+        self.adb = AdbClient(serial=device_serial, default_timeout=5)
+        self._adb_errors = []          # 收集 adb 层面的失败原因，最后统一展示
         self.setWindowTitle("设备信息")
         self.resize(500, 400)
         self.setup_ui()
@@ -45,6 +46,7 @@ class DeviceInfoDialog(QDialog):
         def worker():
             info = {}
             errors = []
+            self._adb_errors.clear()
 
             # 获取分辨率、密度
             try:
@@ -116,6 +118,7 @@ class DeviceInfoDialog(QDialog):
             text = ""
             for key, value in info.items():
                 text += f"{key}: {value}\n"
+            errors.extend(self._adb_errors)
             if errors:
                 text += "\n[错误信息]\n" + "\n".join(errors)
 
@@ -124,16 +127,16 @@ class DeviceInfoDialog(QDialog):
         threading.Thread(target=worker, daemon=True).start()
 
     def _run_adb(self, cmd):
-        try:
-            full_cmd = ["adb", "-s", self.device_serial] + cmd.split()
-            if sys.platform == 'win32':
-                result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=5,
-                                        creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8')
-            else:
-                result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=5, encoding='utf-8')
-            return result.stdout.strip()
-        except Exception:
-            return ""
+        """执行一条 adb 子命令（cmd 形如 "shell getprop xxx"）。
+
+        失败时不再静默返回空串：错误原因收进 self._adb_errors，
+        最终显示在「[错误信息]」里 —— 以前这里 except 后直接 return ""，
+        用户只看到“未知/获取失败”，无从判断是没连设备还是命令不支持。
+        """
+        result = self.adb.run(cmd.split(), timeout=5)
+        if not result.ok and result.error:
+            self._adb_errors.append(f"{cmd}：{result.error}")
+        return result.stdout
 
     def _get_prop(self, prop):
         return self._run_adb(f"shell getprop {prop}")

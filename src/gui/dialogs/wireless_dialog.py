@@ -12,11 +12,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QIcon
-import subprocess
-import sys
-import re
 import qtawesome as qta
 
+from src.core.adb_client import AdbClient
 from src.core.adb_manager import AdbManager
 from src.core.wireless_manager import WirelessManager
 from src.gui.toast import Toast
@@ -34,6 +32,7 @@ class WirelessDialog(QDialog):
         self.adb_manager = adb_manager
         self.wireless_manager = WirelessManager(adb_manager)
         self.current_device = current_device
+        self.adb = AdbClient(serial=current_device)
         self.setWindowTitle("无线联调")
         self.setModal(True)
         self.resize(480, 180)
@@ -106,20 +105,8 @@ class WirelessDialog(QDialog):
         """获取当前选中设备的 Android 版本号，若失败返回空字符串"""
         if not self.current_device:
             return ""
-        try:
-            cmd = ["adb", "-s", self.current_device, "shell", "getprop", "ro.build.version.release"]
-            if sys.platform == 'win32':
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5,
-                                        creationflags=subprocess.CREATE_NO_WINDOW,
-                                        encoding='utf-8', errors='replace')
-            else:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5,
-                                        encoding='utf-8', errors='replace')
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except Exception:
-            pass
-        return ""
+        result = self.adb.shell("getprop ro.build.version.release", timeout=5)
+        return result.stdout.strip() if result.ok else ""
 
     def _update_version_warning(self):
         """检查当前设备版本，若为 Android 12 则显示警告并禁用相关按钮"""

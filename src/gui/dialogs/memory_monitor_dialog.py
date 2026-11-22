@@ -5,8 +5,6 @@
 采用 setsid 启动独立守护进程，避免被杀。
 """
 import os
-import subprocess
-import sys
 import threading
 import time
 from datetime import datetime
@@ -16,7 +14,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Slot
 
-from src.utils.helpers import resource_path, get_adb_path
+from src.core.adb_client import AdbClient
+from src.utils.helpers import resource_path
 # 直接导入底层解析和生成函数
 from src.utils.memory_analyzer import parse_memory_data, _generate_chart, _export_to_excel
 from src.gui.toast import Toast
@@ -33,6 +32,7 @@ class MemoryMonitorDialog(QDialog):
         super().__init__(parent)
         self.adb_manager = adb_manager
         self.device_serial = device_serial
+        self.adb = AdbClient(serial=device_serial)
         self.output_dir = output_dir
         self.local_data_file = None
         self.monitoring = False
@@ -83,19 +83,11 @@ class MemoryMonitorDialog(QDialog):
         self.log_text.append(text)
 
     def _run_adb(self, cmd, timeout=15):
-        adb = get_adb_path()
-        full_cmd = [adb, "-s", self.device_serial] + cmd
-        try:
-            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            proc = subprocess.run(
-                full_cmd, capture_output=True, text=True,
-                timeout=timeout, creationflags=creationflags, encoding='utf-8', errors='replace'
-            )
-            return proc.returncode, proc.stdout, proc.stderr
-        except subprocess.TimeoutExpired:
+        """执行 adb 子命令，返回 (returncode, stdout, stderr)。超时统一标记为 Timeout。"""
+        result = self.adb.run(cmd, timeout=timeout)
+        if result.timed_out:
             return -1, "", "Timeout"
-        except Exception as e:
-            return -1, "", str(e)
+        return result.returncode, result.stdout, result.stderr
 
     def _check_root(self):
         rc, out, _ = self._run_adb(["shell", "id"], timeout=5)

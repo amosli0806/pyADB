@@ -1,6 +1,4 @@
 # src/gui/dialogs/app_manager_dialog.py
-import subprocess
-import sys
 import threading
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
@@ -9,6 +7,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
 from PySide6.QtGui import QIcon
 import qtawesome as qta
 from src.gui.toast import Toast
+from src.core.adb_client import AdbClient
 
 
 class AppManagerDialog(QDialog):
@@ -20,6 +19,7 @@ class AppManagerDialog(QDialog):
         super().__init__(parent)
         self.adb_manager = adb_manager
         self.device_serial = device_serial
+        self.adb = AdbClient(serial=device_serial)
         self.all_apps = []                 # 存储完整应用列表，用于搜索过滤
         self.setWindowTitle("应用管理")
         self.resize(600, 500)
@@ -177,13 +177,11 @@ class AppManagerDialog(QDialog):
         """后台加载应用列表，完成后通过信号发送"""
         def worker():
             # 获取第三方应用
-            cmd3 = ["adb", "-s", self.device_serial, "shell", "pm", "list", "packages", "-3"]
-            result3 = self._run_adb_cmd(cmd3)
+            result3 = self._run_adb_cmd(["shell", "pm", "list", "packages", "-3"])
             third_party = [line.split(':')[1].strip() for line in result3.splitlines() if line.startswith("package:")]
 
             # 获取系统应用
-            cmds = ["adb", "-s", self.device_serial, "shell", "pm", "list", "packages", "-s"]
-            results = self._run_adb_cmd(cmds)
+            results = self._run_adb_cmd(["shell", "pm", "list", "packages", "-s"])
             system = [line.split(':')[1].strip() for line in results.splitlines() if line.startswith("package:")]
 
             all_apps = [(pkg, "系统") for pkg in system] + [(pkg, "第三方") for pkg in third_party]
@@ -217,16 +215,12 @@ class AppManagerDialog(QDialog):
         self.list_widget.clearSelection()
         self._update_button_state()
 
-    def _run_adb_cmd(self, cmd, timeout=10):
-        try:
-            if sys.platform == 'win32':
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                                        creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8')
-            else:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, encoding='utf-8')
-            return result.stdout
-        except Exception:
-            return ""
+    def _run_adb_cmd(self, args, timeout=10):
+        """args 是 adb 子命令（不含 adb 与 -s serial），平台差异由 AdbClient 处理。"""
+        result = self.adb.run(args, timeout=timeout)
+        if not result.ok and result.error:
+            print(f"[adb] {' '.join(map(str, args))}: {result.error}")
+        return result.stdout
 
     def on_selection_changed(self):
         """列表选中项变化时更新按钮状态"""
@@ -289,28 +283,24 @@ class AppManagerDialog(QDialog):
 
         def worker():
             if op == "uninstall":
-                cmd = ["adb", "-s", self.device_serial, "uninstall", pkg]
+                args = ["uninstall", pkg]
                 msg = f"卸载 {pkg}"
             elif op == "clear":
-                cmd = ["adb", "-s", self.device_serial, "shell", "pm", "clear", pkg]
+                args = ["shell", "pm", "clear", pkg]
                 msg = f"清除数据 {pkg}"
             else:  # stop
-                cmd = ["adb", "-s", self.device_serial, "shell", "am", "force-stop", pkg]
+                args = ["shell", "am", "force-stop", pkg]
                 msg = f"强制停止 {pkg}"
 
             try:
-                if sys.platform == 'win32':
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
-                                            creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8')
-                else:
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, encoding='utf-8')
-                if result.returncode == 0:
+                result = self.adb.run(args, timeout=30)
+                if result.ok:
                     self.operation_result.emit(True, f"{msg} 成功")
                 else:
-                    err_msg = result.stderr or result.stdout or "未知错误"
+                    err_msg = result.error or result.stdout or "未知错误"
                     self.operation_result.emit(False, f"{msg} 失败: {err_msg}")
-            except Exception as e:
-                self.operation_result.emit(False, f"执行出错: {str(e)}")
+            except Exception as e:      # AdbClient 已兜住常见错误，这里防意外
+                self.operation_result.emit(False, f"执行出错: {e}")
             finally:
                 self.enable_buttons.emit()
 

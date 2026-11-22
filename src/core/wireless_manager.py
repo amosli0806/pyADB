@@ -5,6 +5,8 @@ import sys
 import socket
 import time
 
+from src.core.adb_client import AdbClient
+
 class WirelessManager:
     def __init__(self, adb_manager):
         self.adb_manager = adb_manager
@@ -64,15 +66,10 @@ class WirelessManager:
             wifi_ifaces = ['wlan0', 'wlan1', 'wifi0', 'wlan2', 'eth0', 'eth1']
 
             # 方法1：尝试从指定接口直接获取 IP（使用 ip addr）
+            adb = AdbClient(serial=serial)
             for iface in wifi_ifaces:
-                cmd = f"adb -s {serial} shell ip addr show {iface}"
-                if sys.platform == 'win32':
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5,
-                                            creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8')
-                else:
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5,
-                                            encoding='utf-8')
-                if result.returncode == 0:
+                result = adb.shell(f"ip addr show {iface}", timeout=5)
+                if result.ok:
                     # 匹配 inet 地址，格式如 "inet 192.168.1.100/24"
                     match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)/', result.stdout)
                     if match:
@@ -89,14 +86,8 @@ class WirelessManager:
             all_ips = []
             wifi_ips = []
             for cmd_base in commands:
-                cmd = f"adb -s {serial} shell {cmd_base}"
-                if sys.platform == 'win32':
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5,
-                                            creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8')
-                else:
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5,
-                                            encoding='utf-8')
-                if result.returncode != 0:
+                result = adb.shell(cmd_base, timeout=5)
+                if not result.ok:
                     continue
                 output = result.stdout
 
@@ -187,15 +178,9 @@ class WirelessManager:
             print(f"获取IP异常: {e}")
             return None
 
-    def _run_adb_command(self, cmd, timeout=10):
-        """执行 ADB 命令并返回结果，隐藏窗口"""
-        common_kwargs = {
-            'shell': True, 'capture_output': True, 'text': True,
-            'timeout': timeout, 'encoding': 'utf-8', 'errors': 'replace'
-        }
-        if sys.platform == 'win32':
-            common_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
-        return subprocess.run(cmd, **common_kwargs)
+    def _run_adb_command(self, args, serial=None, timeout=10):
+        """执行 adb 子命令（args 不含 adb 路径与 -s），返回 AdbResult"""
+        return AdbClient(serial=serial).run(args, timeout=timeout)
 
     def connect(self, ip, port=5555, serial=None):
         # 1. 检查同网段
@@ -209,18 +194,17 @@ class WirelessManager:
 
         # 3. 如果有线设备序列号存在，执行 tcpip 切换
         if serial:
-            check_cmd = f"adb -s {serial} shell getprop service.adb.tcp.port"
-            check_result = self._run_adb_command(check_cmd, timeout=5)
+            check_args = ["shell", "getprop", "service.adb.tcp.port"]
+            check_result = self._run_adb_command(check_args, serial=serial, timeout=5)
             if check_result.returncode == 0 and check_result.stdout.strip() == str(port):
                 pass
             else:
-                tcpip_cmd = f"adb -s {serial} tcpip {port}"
-                tcpip_result = self._run_adb_command(tcpip_cmd, timeout=10)
+                tcpip_result = self._run_adb_command(["tcpip", str(port)], serial=serial, timeout=10)
                 if tcpip_result.returncode != 0:
                     return False, f"设置 TCP/IP 模式失败: {tcpip_result.stderr}"
                 time.sleep(5)
                 for _ in range(3):
-                    check_result = self._run_adb_command(check_cmd, timeout=5)
+                    check_result = self._run_adb_command(check_args, serial=serial, timeout=5)
                     if check_result.returncode == 0 and check_result.stdout.strip() == str(port):
                         break
                     time.sleep(2)
@@ -228,8 +212,7 @@ class WirelessManager:
                     return False, "设备未能成功切换到 TCP/IP 模式，请确保设备已通过 USB 连接并授权。"
 
         # 4. 执行 connect
-        connect_cmd = f"adb connect {ip}:{port}"
-        connect_result = self._run_adb_command(connect_cmd, timeout=30)
+        connect_result = self._run_adb_command(["connect", f"{ip}:{port}"], timeout=30)
         output = connect_result.stdout + connect_result.stderr
         if "connected to" in output or "already connected" in output:
             return True, output.strip()
@@ -243,17 +226,8 @@ class WirelessManager:
 
     def disconnect(self, ip=None):
         try:
-            if ip:
-                cmd = f"adb disconnect {ip}:5555"
-            else:
-                cmd = "adb disconnect"
-            common_kwargs = {
-                'shell': True, 'capture_output': True, 'text': True,
-                'timeout': 10, 'encoding': 'utf-8', 'errors': 'replace'
-            }
-            if sys.platform == 'win32':
-                common_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
-            result = subprocess.run(cmd, **common_kwargs)
+            args = ["disconnect", f"{ip}:5555"] if ip else ["disconnect"]
+            result = self._run_adb_command(args, timeout=10)
             return True, result.stdout.strip()
         except Exception as e:
             return False, str(e)

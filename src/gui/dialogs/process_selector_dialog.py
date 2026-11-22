@@ -1,18 +1,18 @@
 # src/gui/dialogs/process_selector_dialog.py
-import subprocess
-import sys
 import threading
 import re
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                                QListWidget, QListWidgetItem, QPushButton,
                                QLabel, QLineEdit)
 from PySide6.QtCore import Qt
+from src.core.adb_client import AdbClient
 
 
 class ProcessSelectorDialog(QDialog):
     def __init__(self, adb_manager, device_serial, parent=None):
         super().__init__(parent)
         self.device_serial = device_serial
+        self.adb = AdbClient(serial=device_serial)
         self.all_processes = []
         self.setWindowTitle("堆转储")
         self.resize(500, 550)
@@ -95,16 +95,7 @@ class ProcessSelectorDialog(QDialog):
             try:
                 # 只获取已安装的应用包名（不要求进程正在运行）
                 # 同时获取系统应用和第三方应用，与应用管理保持一致
-                cmd = ["adb", "-s", self.device_serial, "shell", "pm", "list", "packages"]
-                if sys.platform == 'win32':
-                    result = subprocess.run(
-                        cmd, capture_output=True, text=True, timeout=15,
-                        creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8'
-                    )
-                else:
-                    result = subprocess.run(
-                        cmd, capture_output=True, text=True, timeout=15, encoding='utf-8'
-                    )
+                result = self.adb.run(["shell", "pm", "list", "packages"], timeout=15)
 
                 packages = []
                 for line in result.stdout.splitlines():
@@ -154,17 +145,8 @@ class ProcessSelectorDialog(QDialog):
             if pkg:
                 # 尝试从设备获取该应用的 PID（如果有正在运行的进程）
                 try:
-                    cmd = ["adb", "-s", self.device_serial, "shell", "pgrep", "-f", pkg]
-                    if sys.platform == 'win32':
-                        result = subprocess.run(
-                            cmd, capture_output=True, text=True, timeout=5,
-                            creationflags=subprocess.CREATE_NO_WINDOW, encoding='utf-8'
-                        )
-                    else:
-                        result = subprocess.run(
-                            cmd, capture_output=True, text=True, timeout=5, encoding='utf-8'
-                        )
-                    if result.returncode == 0 and result.stdout.strip():
+                    result = self.adb.run(["shell", "pgrep", "-f", pkg], timeout=5)
+                    if result.ok and result.stdout.strip():
                         pid = result.stdout.strip().split('\n')[0]
                         return pid
                 except Exception:
