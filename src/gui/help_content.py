@@ -170,6 +170,14 @@ HELP_HTML = '''\
             </ul>
         </div>
 
+        <h3>🐞 出问题时怎么反馈</h3>
+        <ul>
+            <li>程序运行日志写在窗口底部这个按钮能打开的目录里：<code>logs/pyadb.log</code>（打包版为 exe 同级的 <code>logs/</code>）</li>
+            <li>同一目录下最多保留 3 个历史文件（<code>pyadb.log.1</code> ~ <code>.3</code>），单个上限 2MB，只保留最近几次运行</li>
+            <li>提 issue 时附上 <b>操作步骤 + 现象截图 + 日志文件</b>，基本可以一次定位</li>
+            <li>崩溃与未捕获异常（包括子线程里的）都会自动落盘，不需要额外开调试模式</li>
+        </ul>
+
         <div class="footer">
             捕虫师 —— 让 Android 调试更简单
         </div>

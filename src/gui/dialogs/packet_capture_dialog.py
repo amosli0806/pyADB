@@ -12,7 +12,7 @@ from PySide6.QtCore import Signal, QTimer, QThread
 from PySide6.QtGui import QIcon
 import qtawesome as qta
 from src.core.adb_client import AdbClient
-from src.utils.helpers import resource_path
+from src.utils.helpers import resource_path, open_directory
 from src.gui.toast import Toast
 
 from src.utils.logger import get_logger
@@ -140,7 +140,9 @@ class CaptureWorker(QThread):
             try:
                 self.process.terminate()
                 self.process.wait(timeout=3)
-            except:
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                # 进程已退出或不响应 terminate，退化为强杀
+                logger.debug("terminate 失败，改用 kill（_cleanup）: %s", exc, exc_info=True)
                 self.process.kill()
             self.process = None
         if self.file_handle:
@@ -446,12 +448,7 @@ class PacketCaptureDialog(QDialog):
         if self.capture_worker and self.capture_worker.capture_file:
             file_path = self.capture_worker.capture_file
             if os.path.exists(file_path):
-                if sys.platform == 'win32':
-                    os.startfile(os.path.dirname(file_path))
-                elif sys.platform == 'darwin':
-                    subprocess.run(["open", os.path.dirname(file_path)])
-                else:
-                    subprocess.run(["xdg-open", os.path.dirname(file_path)])
+                open_directory(file_path)
 
     def closeEvent(self, event):
         if self.capture_worker and self.capture_worker.isRunning():

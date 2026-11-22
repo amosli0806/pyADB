@@ -73,6 +73,7 @@ config.json 存储用户设置，包括：
 ### 🧾 日志说明
 运行日志写入 logs/pyadb.log（单个 2MB 滚动，保留 3 份历史）。
 反馈问题时附上该文件，可直接看到设备连接、命令执行与异常堆栈。
+程序内「菜单 → 帮助中心」底部会显示当前日志的完整路径，点「打开日志目录」即可直达。
 
 ### macOS 打包注意事项
 1. 资源文件：main.spec 中resources/icons/app_icon.ico图标文件改为resources/icons/app_icon.icns

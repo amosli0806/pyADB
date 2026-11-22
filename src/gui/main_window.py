@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QDialog, QScrollArea, QGridLayout, QLabel, QProgressDialog, QSizePolicy, QFrame
 )
 from PySide6.QtCore import Qt, Slot, QTimer, QThread, Signal
-from PySide6.QtGui import QAction, QIcon, QShortcut, QKeySequence, QTextCursor
+from PySide6.QtGui import QAction, QIcon, QShortcut, QKeySequence, QTextCursor, QFontMetrics
 from src.models.command import Command
 from src.gui.device_selector import DeviceSelector
 from src.gui.command_list import CommandListWidget
@@ -91,6 +91,32 @@ def _fix_menu_shadow(menu: QMenu):
     """
     menu.setWindowFlags(menu.windowFlags() | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
     menu.setAttribute(Qt.WA_TranslucentBackground, True)
+
+
+# 快捷功能分组：(组名, [(按钮文案, 槽函数名, qtawesome 图标名), ...])
+# 按名字显式列而不是按下标切片：槽函数与图标一一对应，改顺序也不会错位。
+# 放在模块级而不是方法里，是为了让「有哪些快捷功能」一眼可见。
+QUICK_GROUPS = (
+    ("设备", (
+        ("无线", "on_wireless", "fa6s.wifi"),
+        ("投屏", "on_scrcpy", "fa6s.desktop"),
+        ("安装", "on_install_app", "fa6s.box"),
+        ("推送", "on_push_file_folder", "fa6s.upload"),
+    )),
+    ("查看", (
+        ("应用管理", "on_app_manager", "fa6s.list"),
+        ("硬件", "on_device_info", "fa6s.microchip"),
+        ("堆转储", "on_hprof_dump", "fa6s.database"),
+        ("MD5", "on_md5_query", "fa6s.key"),
+    )),
+    ("测试", (
+        ("Monkey", "on_monkey", "fa6s.robot"),
+        ("Crash", "on_crash_log", "fa6s.bug"),
+        ("ANR", "on_anr_analyzer", "fa6s.hourglass-half"),
+        ("弱网", "on_weak_network", "fa6s.signal"),
+        ("抓包", "on_packet_capture", "fa6s.network-wired"),
+    )),
+)
 
 
 class MainWindow(QMainWindow):
@@ -261,16 +287,28 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         toolbar.addWidget(spacer)
 
-        # ---- 菜单按钮：次级描边按钮 ----
+        toolbar.addWidget(self._build_menu_button())
+
+        # ---- 清空日志：破坏性操作，描边砖红（放在「运行日志」标题行右侧） ----
+        self.clear_log_btn = QPushButton(" 清空")
+        self.clear_log_btn.setIcon(qta.icon('fa6s.trash-can', color='#A6402F'))
+        self.clear_log_btn.setObjectName("dangerBtn")
+        self.clear_log_btn.setProperty("compact", "true")   # 26px 高，和「执行选中」同档
+        self.clear_log_btn.clicked.connect(self.on_clear_log)
+
+    def _build_menu_button(self):
+        """工具栏最右的「菜单」：设置 / 检查更新 / 帮助 / 关于。
+
+        指令相关的展示、增删改、导入导出已全部收敛到左侧「指令管理 ▾」，
+        这里不再重复，避免两处入口同一件事。
+        """
         self.menu_btn = QPushButton(" 菜单")
         self.menu_btn.setIcon(qta.icon('fa6s.gear', color='#1F1D1A'))
         self.menu_btn.setObjectName("menuButton")
 
         menu = QMenu(self)
         # 菜单外观由全局 QSS 的 QMenu 规则统一控制
-        # 指令相关操作（展示/增删改/导入导出）已全部收敛到左侧「指令管理 ▾」，这里不再重复
 
-        # ---------- 设置 & 更新 & 关于 ----------
         self.settings_action = QAction("设  置", self)
         self.settings_action.setIcon(qta.icon('fa6s.gear', color='#1F1D1A'))
         self.settings_action.triggered.connect(self.on_settings)
@@ -281,6 +319,13 @@ class MainWindow(QMainWindow):
         self.update_action.triggered.connect(self.on_check_update)
         menu.addAction(self.update_action)
 
+        # 帮助中心：on_help 一直存在，但从引入起就没有接过任何入口（菜单里只有设置/更新/关于），
+        # 等于 HELP_HTML 那整套说明从来没被用户看见过。这里补上接线。
+        self.help_action = QAction("帮  助", self)
+        self.help_action.setIcon(qta.icon('fa6s.circle-question', color='#1F1D1A'))
+        self.help_action.triggered.connect(self.on_help)
+        menu.addAction(self.help_action)
+
         self.about_action = QAction ( "  关  于 " , self )
         self.about_action.setIcon ( qta.icon ( 'fa6s.circle-info' , color = '#1F1D1A' ) )
         self.about_action.triggered.connect ( self.on_about )
@@ -288,14 +333,7 @@ class MainWindow(QMainWindow):
 
         _fix_menu_shadow(menu)
         self.menu_btn.setMenu ( menu )
-        toolbar.addWidget ( self.menu_btn )
-
-        # ---- 清空日志：破坏性操作，描边砖红（放在「运行日志」标题行右侧） ----
-        self.clear_log_btn = QPushButton(" 清空")
-        self.clear_log_btn.setIcon(qta.icon('fa6s.trash-can', color='#A6402F'))
-        self.clear_log_btn.setObjectName("dangerBtn")
-        self.clear_log_btn.setProperty("compact", "true")   # 26px 高，和「执行选中」同档
-        self.clear_log_btn.clicked.connect(self.on_clear_log)
+        return self.menu_btn
 
     # ---------- 左侧：指令卡片 ----------
     def _build_command_panel(self):
@@ -340,13 +378,21 @@ class MainWindow(QMainWindow):
         return right_widget
 
     def _build_quick_panel(self):
-        # ---------- 快捷功能栏：分组定义见下方 groups ----------
+        # ---------- 快捷功能栏 ----------
         panel = QWidget()
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(0, 0, 0, 0)   # 容器本身不留白，边框由下面的 scroll_area 画
         panel_layout.setSpacing(8)
+        panel_layout.addLayout(self._build_search_row())
+        panel_layout.addWidget(self._build_quick_grid())
+        return panel
 
-        # 创建容器和网格布局
+    def _build_quick_grid(self):
+        """13 个快捷按钮的网格，外面套一层带描边的滚动区。
+
+        分组见模块级 QUICK_GROUPS：按用途分三组，找东西时先定位到组，
+        再在组内扫，比在一排十几个图标里逐个找快得多。
+        """
         quick_widget = QWidget()
         quick_widget.setObjectName("quickPanel")
         quick_layout = QGridLayout(quick_widget)
@@ -354,47 +400,24 @@ class MainWindow(QMainWindow):
         quick_layout.setHorizontalSpacing(4)
         quick_layout.setVerticalSpacing(3)
 
-        # 按用途分三组：找东西时先定位到组，再在组内扫 —— 比在一排 13 个图标里找快得多
-        # 注意按名字显式列，别按下标切片：原列表里 Monkey/MD5 的位置和分组顺序不一致
-        groups = [
-            ("设备", [
-                ("无线", self.on_wireless, 'fa6s.wifi'),
-                ("投屏", self.on_scrcpy, 'fa6s.desktop'),
-                ("安装", self.on_install_app, 'fa6s.box'),
-                ("推送", self.on_push_file_folder, 'fa6s.upload'),
-            ]),
-            ("查看", [
-                ("应用管理", self.on_app_manager, 'fa6s.list'),
-                ("硬件", self.on_device_info, 'fa6s.microchip'),
-                ("堆转储", self.on_hprof_dump, 'fa6s.database'),
-                ("MD5", self.on_md5_query, 'fa6s.key'),
-            ]),
-            ("测试", [
-                ("Monkey", self.on_monkey, 'fa6s.robot'),
-                ("Crash", self.on_crash_log, 'fa6s.bug'),
-                ("ANR", self.on_anr_analyzer, 'fa6s.hourglass-half'),
-                ("弱网", self.on_weak_network, 'fa6s.signal'),
-                ("抓包", self.on_packet_capture, 'fa6s.network-wired'),
-            ]),
-        ]
-
-        for row, (group_name, items) in enumerate(groups):
+        for row, (group_name, items) in enumerate(QUICK_GROUPS):
             label = QLabel(group_name)
             label.setObjectName("quickGroupLabel")
             label.setFixedWidth(30)
             quick_layout.addWidget(label, row, 0, Qt.AlignVCenter)
 
-            for col, (text, slot, icon_name) in enumerate(items, start=1):
+            for col, (text, slot_name, icon_name) in enumerate(items, start=1):
                 btn = QPushButton(f" {text}")
                 btn.setObjectName("quickBtn")
                 btn.setIcon(qta.icon(icon_name, color='#1F1D1A'))
                 btn.setFixedWidth(98)      # 等宽：不再因为「无线」和「应用管理」字数不同而参差
                 btn.setFixedHeight(30)
                 btn.setCursor(Qt.PointingHandCursor)
-                btn.clicked.connect(slot)
+                btn.clicked.connect(getattr(self, slot_name))
                 quick_layout.addWidget(btn, row, col)
 
-        quick_layout.setColumnStretch(len(max(groups, key=lambda g: len(g[1]))[1]) + 1, 1)
+        widest = max(len(items) for _, items in QUICK_GROUPS)
+        quick_layout.setColumnStretch(widest + 1, 1)
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -413,8 +436,13 @@ class MainWindow(QMainWindow):
             }
         """)
         scroll_area.setWidget(quick_widget)
+        return scroll_area
 
-        # 这一行只放搜索：右侧快捷工具区本身有图标，不需要再顶一行文案
+    def _build_search_row(self):
+        """搜索行：输入框占满整行，只在右侧给「查找」留位置。
+
+        这一行只放搜索：右侧快捷工具区本身有图标，不需要再顶一行文案。
+        """
         self.search_edit = QLineEdit()
         self.search_edit.setObjectName("searchEdit")
         self.search_edit.setPlaceholderText("搜索预设 / 自定义 / ADB 库中的指令")
@@ -432,10 +460,7 @@ class MainWindow(QMainWindow):
         head_row.setContentsMargins(0, 0, 0, 0)   # 紧贴列顶：和左侧卡片的上边框齐平
         head_row.addWidget(self.search_edit, 1)   # 占满整行，只在右侧给「查找」留位置
         head_row.addWidget(self.search_btn)
-
-        panel_layout.addLayout(head_row)
-        panel_layout.addWidget(scroll_area)
-        return panel
+        return head_row
 
     def _build_log_panel(self):
         # ---- 运行日志：文案与清空按钮放进输出框顶部（同一张卡片，不再单独占一行） ----
@@ -1192,19 +1217,20 @@ class MainWindow(QMainWindow):
             logger.error("安装异常: %s", filename, exc_info=True)
             self.append_log(f"<span style='color:red;'>安装异常: {str(e)}</span>")
 
-    @Slot ( )
-    def on_help ( self ) :
-        dialog = QDialog ( self )
-        dialog.setWindowTitle ( "帮助中心" )
-        dialog.resize ( 600 , 620 )
+    @Slot()
+    def on_help(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("帮助中心")
+        dialog.resize(600, 620)
 
-        layout = QVBoxLayout ( dialog )
-        layout.setContentsMargins ( 0 , 0 , 0 , 0 )
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        text_edit = QTextEdit ( )
-        text_edit.setReadOnly ( True )
-        text_edit.setHtml ( HELP_HTML )
-        text_edit.setStyleSheet (
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setHtml(HELP_HTML)
+        text_edit.setStyleSheet(
             """
             QTextEdit {
                 background-color: white;
@@ -1213,9 +1239,66 @@ class MainWindow(QMainWindow):
             }
         """
             )
-        layout.addWidget ( text_edit )
+        layout.addWidget(text_edit, 1)
+        layout.addWidget(self._build_help_footer(dialog))
 
-        dialog.exec ( )
+        dialog.exec()
+
+    def _build_help_footer(self, parent):
+        """帮助中心底部：当前日志路径 + 一键打开目录。
+
+        日志以前只写不露 —— 用户按帮助提示去翻，也不知道落在哪。
+        这里把真实路径读出来（打包版是 exe 同级的 logs/），并给出打开入口；
+        目录不可写时按钮置灰，避免"点了没反应"。
+        """
+        from src.utils.logger import get_log_file, get_log_dir_or_none
+        from src.utils.helpers import open_directory
+
+        footer = QWidget(parent)
+        footer.setObjectName("helpFooter")
+        # 纯 QWidget 默认不画样式表背景/边框，必须显式开启，否则只在部分平台生效
+        footer.setAttribute(Qt.WA_StyledBackground, True)
+        footer.setStyleSheet(
+            "QWidget#helpFooter {"
+            "  background-color: #FBFAF7;"
+            "  border-top: 1px solid #E3DED5;"
+            "}"
+        )
+
+        row = QHBoxLayout(footer)
+        row.setContentsMargins(16, 10, 16, 10)
+        row.setSpacing(10)
+
+        log_file = get_log_file()
+        log_dir = get_log_dir_or_none()
+
+        path_label = QLabel(footer)
+        path_label.setObjectName("helpLogPath")
+        path_label.setStyleSheet("color: #6E675D; font-size: 12px;")
+        if log_file:
+            # 路径可能很长，按可用宽度省略中段；完整路径放 tooltip
+            shown = QFontMetrics(path_label.font()).elidedText(
+                log_file, Qt.ElideMiddle, 400)
+            path_label.setText(f"日志：{shown}")
+            path_label.setToolTip(log_file)
+        elif log_dir:
+            path_label.setText("日志：当前未写入文件（仅控制台输出）")
+            path_label.setToolTip(log_dir)
+        else:
+            path_label.setText("日志：未启用")
+        row.addWidget(path_label, 1)
+
+        open_btn = QPushButton(" 打开日志目录", footer)
+        open_btn.setCursor(Qt.PointingHandCursor)
+        open_btn.setEnabled(bool(log_dir))
+        if log_dir:
+            open_btn.setIcon(qta.icon('fa6s.folder-open', color='#1F1D1A'))
+            open_btn.clicked.connect(lambda: open_directory(log_dir))
+        else:
+            open_btn.setToolTip("日志目录不可写，未能创建")
+        row.addWidget(open_btn)
+
+        return footer
 
     @Slot()
     def on_app_manager(self):

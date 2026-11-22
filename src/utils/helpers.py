@@ -13,6 +13,10 @@ import subprocess    # 用于执行外部命令
 import os            # 用于文件和路径操作
 import sys           # 用于判断系统类型和打包环境
 
+# 注意：不在此处 get_logger()。helpers 是最早被导入的模块之一，
+# 模块级取 logger 会连带触发 setup_logging()，在 main() 之前就把日志文件建出来，
+# 反而破坏了「启动前不落盘」的约定。用的时候再取。
+
 
 def resource_path(relative_path):
     """
@@ -75,6 +79,41 @@ def get_adb_path():
 
     # 3. 最后依赖系统 PATH 环境变量
     return "adb"
+
+
+def open_directory(path):
+    """
+    在系统文件管理器中打开目录（Windows 资源管理器 / macOS 访达 / Linux 默认管理器）。
+    原先这段三平台分支在若干对话框里各写了一遍，这里收敛成一处。
+
+    :param path: 要打开的目录；若传入的是文件，则打开其所在目录
+    :return: 是否成功发起打开动作
+    """
+    if not path:
+        return False
+    if os.path.isdir(path):
+        target = path
+    elif os.path.isfile(path):
+        # 传入文件时，打开它所在的目录（「打开文件位置」的常见语义）
+        target = os.path.dirname(path)
+    else:
+        # 路径不存在就直接返回：不要退而打开上级目录，那会让调用方以为成功了
+        return False
+    if not target or not os.path.isdir(target):
+        return False
+
+    try:
+        if sys.platform == 'win32':
+            os.startfile(target)
+        elif sys.platform == 'darwin':
+            subprocess.run(["open", target], check=False)
+        else:
+            subprocess.run(["xdg-open", target], check=False)
+        return True
+    except OSError as exc:
+        from src.utils.logger import get_logger
+        get_logger(__name__).debug("打开目录失败（open_directory）: %s", exc, exc_info=True)
+        return False
 
 
 def get_timestamp():

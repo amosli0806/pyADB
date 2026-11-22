@@ -93,6 +93,17 @@ def get_log_dir_or_none():
     return path if os.path.isdir(path) else None
 
 
+def get_log_file():
+    """返回当前进程正在写的日志文件路径；不可用时返回 None
+
+    目录不可写时 setup_logging 会降级为仅控制台，此时 _log_file 为 None，
+    帮助中心据此把「打开日志目录」按钮置灰，而不是让用户点了没反应。
+    """
+    root = logging.getLogger(_LOGGER_NAME)
+    path = getattr(root, "_log_file", None)
+    return path if path and os.path.isfile(path) else None
+
+
 def get_logger(name=None):
     """获取带应用前缀的 logger，name 传 __name__ 即可"""
     if not _CONFIGURED:
