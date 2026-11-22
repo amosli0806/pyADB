@@ -282,7 +282,8 @@ class AnrAnalyzerDialog(QDialog):
         try:
             with open(path, 'r', encoding='utf-8', errors='replace') as f:
                 return f.read()
-        except:
+        except OSError as exc:
+            logger.debug("读取 ANR 文件失败（_read_file）: %s", exc, exc_info=True)
             return ""
 
     def _parse_anr(self, content):

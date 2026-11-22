@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QProgressBar,
                                QPushButton, QLabel, QMessageBox)
 from PySide6.QtCore import QThread, Signal
 from src.core.adb_client import AdbClient
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class PushWorker(QThread):
@@ -107,7 +110,8 @@ class PushWorker(QThread):
             try:
                 self._process.terminate()
                 self._process.wait(timeout=2)
-            except:
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                logger.debug("terminate 失败，改用 kill（PushWorker.stop）: %s", exc, exc_info=True)
                 self._process.kill()
 
 

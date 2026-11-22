@@ -313,11 +313,12 @@ class ScreenMirrorDialog(QDialog):
             try:
                 self.scrcpy_process.terminate()
                 self.scrcpy_process.wait(timeout=2)
-            except:
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                logger.debug("terminate 失败，改用 kill（start_mirror）: %s", exc, exc_info=True)
                 try:
                     self.scrcpy_process.kill()
-                except Exception as exc:
-                    logger.debug("忽略异常（start_mirror）: %s", exc, exc_info=True)
+                except OSError as kill_exc:
+                    logger.debug("忽略异常（start_mirror.kill）: %s", kill_exc, exc_info=True)
             self.scrcpy_process = None
         self.scrcpy_pid = None
 
@@ -334,7 +335,8 @@ class ScreenMirrorDialog(QDialog):
                     scrcpy_path = "scrcpy"
                     try:
                         subprocess.run([scrcpy_path, "--version"], capture_output=True, timeout=5, check=True)
-                    except:
+                    except (OSError, subprocess.SubprocessError) as exc:
+                        logger.info("未找到可用的 scrcpy: %s", exc)
                         ui_call(self, self._on_mirror_missing_scrcpy)
                         return
 

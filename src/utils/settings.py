@@ -10,6 +10,9 @@ import os            # 用于文件和目录操作
 
 # 导入常量：默认输出目录和配置文件路径
 from src.utils.constants import DEFAULT_OUTPUT_DIR, CONFIG_FILE
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class Settings:
@@ -89,8 +92,10 @@ class Settings:
                 # 以只读方式打开，UTF-8 编码
                 with open(cls.CONFIG_FILE, 'r', encoding='utf-8') as f:
                     return json.load(f)          # 解析 JSON 为字典并返回
-            except:
-                # 任何异常（如 JSON 格式错误）都返回空字典
+            except (OSError, ValueError) as exc:
+                # JSON 损坏或被手工改错时会静默退回默认值：快捷键、输出目录全丢。
+                # 用户只知道"设置又变回去了"，所以这里记一条 warning 便于定位。
+                logger.warning("配置文件读取失败，使用默认设置: %s", exc, exc_info=True)
                 return {}
         # 文件不存在也返回空字典
         return {}
